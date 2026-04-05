@@ -1,0 +1,2836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weak Signals · David's Notes</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #07090f;
+    --surface: #0d1117;
+    --surface2: #161b22;
+    --border: rgba(255,255,255,0.07);
+    --border-active: rgba(255,255,255,0.18);
+    --text: #e2e8f0;
+    --text-muted: #64748b;
+    --text-dim: #94a3b8;
+
+    --now:    #f97316;
+    --near:   #eab308;
+    --medium: #22c55e;
+    --long:   #3b82f6;
+    --far:    #a855f7;
+
+    --ai:   #38bdf8;
+    --energy: #4ade80;
+    --geo:  #f87171;
+    --econ: #fbbf24;
+    --env:  #34d399;
+    --social: #c084fc;
+
+    --panel-width: 400px;
+    --header-h: 64px;
+    --filter-h: 52px;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.5; overflow: hidden; }
+
+  /* ── HEADER ── */
+  .header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: var(--header-h);
+    background: rgba(7,9,15,0.92);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 20px; padding: 0 24px;
+  }
+  .header-logo { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .header-logo svg { color: var(--now); }
+  .header-title { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+  .header-sub { font-size: 12px; color: var(--text-muted); }
+  .header-search {
+    flex: 1; max-width: 360px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px 7px 34px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    position: relative;
+    transition: border-color 0.2s;
+  }
+  .header-search:focus { border-color: var(--border-active); }
+  .search-wrap { position: relative; }
+  .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+
+  .view-toggle { display: flex; gap: 2px; margin-left: auto; }
+  .view-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;
+    transition: all 0.15s;
+  }
+  .view-btn:hover { border-color: var(--border-active); color: var(--text); }
+  .view-btn.active { background: var(--surface2); border-color: var(--border-active); color: var(--text); }
+
+  .signal-count-badge {
+    background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.25);
+    color: var(--ai); border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 600;
+  }
+
+  /* ── FILTER BAR ── */
+  .filter-bar {
+    position: fixed; top: var(--header-h); left: 0; right: 0; z-index: 99;
+    height: var(--filter-h);
+    background: rgba(7,9,15,0.88);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; padding: 0 24px;
+    overflow-x: auto;
+  }
+  .filter-bar::-webkit-scrollbar { display: none; }
+  .filter-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; margin: 0 4px; }
+  .filter-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid transparent; white-space: nowrap;
+    transition: all 0.15s; flex-shrink: 0;
+    background: var(--surface2); border-color: var(--border); color: var(--text-muted);
+  }
+  .pill:hover { color: var(--text); border-color: var(--border-active); }
+  .pill.active { color: var(--text); border-color: var(--border-active); background: rgba(255,255,255,0.06); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* ── MAIN LAYOUT ── */
+  .main {
+    position: fixed;
+    top: calc(var(--header-h) + var(--filter-h));
+    left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+  }
+  .content {
+    position: absolute; inset: 0;
+    overflow-y: auto; overflow-x: hidden;
+    padding: 24px;
+    transition: right 0.35s cubic-bezier(0.4,0,0.2,1);
+  }
+  .content.panel-open { right: var(--panel-width); }
+
+  /* ── BUBBLE CHART ── */
+  #bubble-view { width: 100%; }
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+  .chart-container svg { display: block; width: 100%; }
+
+  .axis text { fill: var(--text-muted); font-size: 11px; }
+  .axis line, .axis path { stroke: rgba(255,255,255,0.08); }
+  .axis-label { fill: var(--text-dim); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .quadrant-label { fill: rgba(255,255,255,0.12); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  .grid-line { stroke: rgba(255,255,255,0.04); }
+  .midline { stroke: rgba(255,255,255,0.08); stroke-dasharray: 4,4; }
+
+  .bubble {
+    cursor: pointer;
+    transition: r 0.2s, opacity 0.2s;
+    filter: url(#glow);
+  }
+  .bubble:hover { opacity: 1 !important; }
+
+  .bubble-label {
+    font-size: 10px; fill: rgba(255,255,255,0.7); pointer-events: none;
+    text-anchor: middle; dominant-baseline: middle;
+  }
+
+  /* Tooltip */
+  .tooltip {
+    position: fixed; z-index: 200;
+    background: rgba(13,17,23,0.97);
+    border: 1px solid var(--border-active);
+    border-radius: 10px; padding: 12px 16px;
+    max-width: 280px; pointer-events: none;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .tooltip.visible { opacity: 1; }
+  .tt-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .tt-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .tt-chip {
+    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
+    border: 1px solid transparent;
+  }
+  .tt-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .tt-stat { background: var(--surface2); border-radius: 6px; padding: 6px 8px; }
+  .tt-stat-label { font-size: 10px; color: var(--text-muted); }
+  .tt-stat-value { font-size: 14px; font-weight: 700; }
+
+  /* Legend */
+  .chart-legend {
+    display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 16px;
+    border-top: 1px solid var(--border); margin-top: 4px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ── GRID VIEW ── */
+  #grid-view { display: none; }
+  .signals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .signal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .signal-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  }
+  .signal-card:hover { border-color: var(--border-active); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+  .signal-card:hover::before { opacity: 1; }
+
+  .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+  .card-title { font-size: 13px; font-weight: 600; line-height: 1.4; }
+  .card-horizon { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+
+  .card-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .card-footer { display: flex; gap: 8px; align-items: center; }
+  .card-cat { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px; border: 1px solid transparent; }
+  .card-metrics { display: flex; gap: 12px; margin-left: auto; }
+  .card-metric { text-align: right; }
+  .card-metric-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .card-metric-value { font-size: 14px; font-weight: 700; }
+  .card-metric-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 3px; overflow: hidden; }
+  .card-metric-fill { height: 100%; border-radius: 2px; }
+
+  /* ── TIMELINE VIEW ── */
+  #timeline-view { display: none; }
+  .timeline-track {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+    min-height: 300px;
+  }
+  .timeline-col { }
+  .timeline-col-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-radius: 8px; margin-bottom: 12px;
+    font-size: 12px; font-weight: 700; border: 1px solid transparent;
+  }
+  .timeline-col-header .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .timeline-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .timeline-card:hover { border-color: var(--border-active); transform: translateX(2px); }
+  .timeline-card-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; line-height: 1.4; }
+  .timeline-card-cat { font-size: 10px; color: var(--text-muted); }
+  .timeline-card-impact { font-size: 10px; font-weight: 700; margin-top: 6px; }
+
+  /* ── DETAIL PANEL ── */
+  .detail-panel {
+    position: fixed; top: calc(var(--header-h) + var(--filter-h)); right: 0; bottom: 0;
+    width: var(--panel-width);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    z-index: 150;
+    transform: translateX(100%);
+    transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .detail-panel.open { transform: translateX(0); }
+  .detail-panel-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; gap: 12px;
+    flex-shrink: 0;
+  }
+  .detail-panel-header-content { flex: 1; }
+  .detail-close {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 16px;
+    flex-shrink: 0; transition: all 0.15s;
+  }
+  .detail-close:hover { color: var(--text); border-color: var(--border-active); }
+  .detail-title { font-size: 15px; font-weight: 700; line-height: 1.4; margin-bottom: 8px; }
+  .detail-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .detail-badge { font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 20px; border: 1px solid transparent; }
+  .detail-body { flex: 1; overflow-y: auto; padding: 20px; }
+  .detail-body::-webkit-scrollbar { width: 4px; }
+  .detail-body::-webkit-scrollbar-track { background: transparent; }
+  .detail-body::-webkit-scrollbar-thumb { background: var(--border-active); border-radius: 4px; }
+
+  .detail-metrics {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px;
+  }
+  .detail-metric {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px;
+    text-align: center;
+  }
+  .detail-metric-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .detail-metric-value { font-size: 22px; font-weight: 800; }
+  .detail-metric-sub { font-size: 10px; color: var(--text-muted); }
+
+  .detail-section { margin-bottom: 20px; }
+  .detail-section-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-muted); margin-bottom: 8px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .detail-section p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .detail-evidence {
+    background: rgba(56,189,248,0.06); border: 1px solid rgba(56,189,248,0.15);
+    border-radius: 8px; padding: 12px; font-size: 12px; color: var(--text-dim); line-height: 1.5;
+  }
+  .detail-implications {
+    background: rgba(250,251,252,0.03); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; font-size: 12px; color: var(--text-dim); line-height: 1.5;
+  }
+  .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .detail-tag {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 3px 8px; font-size: 11px; color: var(--text-muted);
+  }
+  .detail-source { font-size: 11px; color: var(--text-muted); font-style: italic; padding: 8px; background: var(--surface2); border-radius: 6px; }
+
+  /* ── EMPTY STATE ── */
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--text-muted);
+  }
+  .empty-state svg { margin-bottom: 16px; opacity: 0.3; }
+  .empty-state h3 { font-size: 15px; margin-bottom: 6px; color: var(--text-dim); }
+
+  /* ── STAT STRIP ── */
+  .stat-strip {
+    display: flex; gap: 0; margin-bottom: 20px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  .stat-item { flex: 1; padding: 14px 16px; border-right: 1px solid var(--border); }
+  .stat-item:last-child { border-right: none; }
+  .stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .stat-value { font-size: 22px; font-weight: 800; }
+  .stat-sub { font-size: 11px; color: var(--text-muted); }
+
+  /* ── THEMES VIEW ── */
+  #themes-view { display: none; }
+
+  .themes-intro {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin-bottom: 24px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .themes-intro-icon { font-size: 22px; flex-shrink: 0; }
+  .themes-intro p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .themes-intro strong { color: var(--text); }
+
+  .themes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+    gap: 20px;
+  }
+
+  .theme-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: default;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    animation: fadeUp 0.35s ease both;
+  }
+  .theme-card:hover { border-color: var(--border-active); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+
+  .theme-card-top {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .theme-card-glow {
+    position: absolute; top: -60px; right: -60px;
+    width: 200px; height: 200px; border-radius: 50%;
+    pointer-events: none; opacity: 0.06;
+  }
+  .theme-number {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .theme-title {
+    font-size: 17px; font-weight: 800; letter-spacing: -0.4px; line-height: 1.25;
+    margin-bottom: 5px;
+  }
+  .theme-tagline {
+    font-size: 12px; color: var(--text-muted); line-height: 1.4; font-style: italic;
+  }
+
+  .theme-strength-bar {
+    height: 3px; border-radius: 2px; margin-top: 12px;
+    background: var(--border); overflow: hidden;
+  }
+  .theme-strength-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+
+  .theme-card-body {
+    padding: 16px 20px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+
+  .theme-section-label {
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted); margin-bottom: 7px;
+  }
+  .theme-description {
+    font-size: 12.5px; color: var(--text-dim); line-height: 1.65;
+  }
+
+  .theme-insight {
+    background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px 12px;
+    margin-top: 10px; border-left: 3px solid transparent;
+  }
+  .theme-insight p { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+
+  .theme-tension {
+    background: rgba(255,255,255,0.02); border-radius: 8px; padding: 10px 12px;
+    margin-bottom: 12px;
+    border-left: 3px solid rgba(239,68,68,0.5);
+  }
+  .theme-tension p { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+
+  .theme-signals-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .theme-signal-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px; border-radius: 20px; font-size: 10px; font-weight: 500;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text-muted); cursor: pointer; white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .theme-signal-pill:hover { color: var(--text); border-color: var(--border-active); }
+  .theme-signal-pill .hdot { width: 5px; height: 5px; border-radius: 50%; }
+
+  .theme-card-footer {
+    padding: 10px 20px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .theme-meta { display: flex; gap: 16px; }
+  .theme-meta-item { font-size: 11px; color: var(--text-muted); }
+  .theme-meta-value { font-weight: 700; }
+
+  /* Animations */
+  @keyframes fadeUp { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: none; } }
+  .signal-card, .timeline-card { animation: fadeUp 0.3s ease both; }
+
+  /* Scrollbar */
+  .content::-webkit-scrollbar { width: 5px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: var(--border-active); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-logo">
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+      <circle cx="11" cy="11" r="10" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+      <circle cx="11" cy="11" r="5" fill="currentColor" opacity="0.6"/>
+      <circle cx="11" cy="11" r="2" fill="currentColor"/>
+    </svg>
+    <div>
+      <div class="header-title">Weak Signals</div>
+      <div class="header-sub">David's Intelligence Dashboard</div>
+    </div>
+  </div>
+
+  <div class="search-wrap">
+    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" class="header-search" id="searchInput" placeholder="Search signals…" autocomplete="off">
+  </div>
+
+  <span class="signal-count-badge" id="countBadge">28 signals</span>
+
+  <div class="view-toggle">
+    <button class="view-btn active" data-view="bubble">⬤ Matrix</button>
+    <button class="view-btn" data-view="grid">▦ Grid</button>
+    <button class="view-btn" data-view="timeline">⊣ Timeline</button>
+    <button class="view-btn" data-view="themes">◈ Themes</button>
+  </div>
+</div>
+
+<!-- FILTER BAR -->
+<div class="filter-bar" id="filterBar">
+  <span class="filter-label">Category</span>
+  <div class="pill active" data-filter="cat" data-value="all">All</div>
+  <div class="pill" data-filter="cat" data-value="AI & Technology" style="--dot: var(--ai)"><span class="dot" style="background:var(--ai)"></span>AI & Technology</div>
+  <div class="pill" data-filter="cat" data-value="Energy" style="--dot: var(--energy)"><span class="dot" style="background:var(--energy)"></span>Energy</div>
+  <div class="pill" data-filter="cat" data-value="Geopolitics" style="--dot: var(--geo)"><span class="dot" style="background:var(--geo)"></span>Geopolitics</div>
+  <div class="pill" data-filter="cat" data-value="Economics" style="--dot: var(--econ)"><span class="dot" style="background:var(--econ)"></span>Economics</div>
+  <div class="filter-sep"></div>
+  <span class="filter-label">Horizon</span>
+  <div class="pill active" data-filter="hor" data-value="all">All</div>
+  <div class="pill" data-filter="hor" data-value="now"><span class="dot" style="background:var(--now)"></span>Now</div>
+  <div class="pill" data-filter="hor" data-value="near"><span class="dot" style="background:var(--near)"></span>Near 1–3yr</div>
+  <div class="pill" data-filter="hor" data-value="medium"><span class="dot" style="background:var(--medium)"></span>Medium 3–7yr</div>
+  <div class="pill" data-filter="hor" data-value="long"><span class="dot" style="background:var(--long)"></span>Long 7–15yr</div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="content" id="mainContent">
+
+    <!-- STAT STRIP -->
+    <div class="stat-strip" id="statStrip">
+      <div class="stat-item">
+        <div class="stat-label">Signals</div>
+        <div class="stat-value" id="statTotal">28</div>
+        <div class="stat-sub">across 4 domains</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Avg Impact</div>
+        <div class="stat-value" id="statImpact" style="color:var(--now)">—</div>
+        <div class="stat-sub">out of 10</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Avg Probability</div>
+        <div class="stat-value" id="statProb" style="color:var(--near)">—</div>
+        <div class="stat-sub">likelihood</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Critical Trends</div>
+        <div class="stat-value" id="statCritical" style="color:var(--medium)">—</div>
+        <div class="stat-sub">high impact + high prob</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Wild Cards</div>
+        <div class="stat-value" id="statWild" style="color:var(--far)">—</div>
+        <div class="stat-sub">high impact + uncertain</div>
+      </div>
+    </div>
+
+    <!-- BUBBLE VIEW -->
+    <div id="bubble-view">
+      <div class="chart-container" id="chartContainer">
+        <svg id="bubbleChart"></svg>
+      </div>
+      <div class="chart-legend" id="chartLegend">
+        <span style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Horizon:</span>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--now)"></div>Now (0–1yr)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--near)"></div>Near (1–3yr)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--medium)"></div>Medium (3–7yr)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--long)"></div>Long (7–15yr)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--far)"></div>Far (15yr+)</div>
+        <div style="margin-left:16px;font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Ring:</div>
+        <div class="legend-item"><div class="legend-dot" style="background:transparent;border:2px solid var(--ai)"></div>AI & Tech</div>
+        <div class="legend-item"><div class="legend-dot" style="background:transparent;border:2px solid var(--energy)"></div>Energy</div>
+        <div class="legend-item"><div class="legend-dot" style="background:transparent;border:2px solid var(--geo)"></div>Geopolitics</div>
+        <div class="legend-item"><div class="legend-dot" style="background:transparent;border:2px solid var(--econ)"></div>Economics</div>
+      </div>
+    </div>
+
+    <!-- GRID VIEW -->
+    <div id="grid-view">
+      <div class="signals-grid" id="signalsGrid"></div>
+    </div>
+
+    <!-- TIMELINE VIEW -->
+    <div id="timeline-view">
+      <div class="timeline-track" id="timelineTrack"></div>
+    </div>
+
+    <!-- THEMES VIEW -->
+    <div id="themes-view">
+      <div class="themes-intro">
+        <div class="themes-intro-icon">◈</div>
+        <p><strong>Emergent meta-themes</strong> — patterns inferred by reading across signals, not within them. Each theme names a structural dynamic that multiple signals point to simultaneously. The non-obvious insight is what the signals imply <em>together</em> that none states alone.</p>
+      </div>
+      <div class="themes-grid" id="themesGrid"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-panel" id="detailPanel">
+  <div class="detail-panel-header">
+    <div class="detail-panel-header-content">
+      <div class="detail-title" id="dpTitle"></div>
+      <div class="detail-badges" id="dpBadges"></div>
+    </div>
+    <button class="detail-close" id="detailClose">✕</button>
+  </div>
+  <div class="detail-body">
+    <div class="detail-metrics" id="dpMetrics"></div>
+    <div class="detail-section">
+      <div class="detail-section-title">Signal Description</div>
+      <p id="dpDesc"></p>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Key Evidence</div>
+      <div class="detail-evidence" id="dpEvidence"></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Strategic Implications</div>
+      <div class="detail-implications" id="dpImplications"></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Tags</div>
+      <div class="detail-tags" id="dpTags"></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">Source Note</div>
+      <div class="detail-source" id="dpSource"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TOOLTIP -->
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ─────────────────────────────────────────────────────────
+// BEGIN_SIGNALS_DATA
+const SIGNALS = [
+  {
+    "id": 1,
+    "title": "Inference Economy Structural Shift",
+    "category": "AI & Technology",
+    "subcategory": "AI Systems",
+    "description": "The AI industry is pivoting from a training-economy to an inference-economy. NVIDIA acquired Groq for $20B; Vera Rubin/Groq delivers 35x throughput improvement per megawatt vs Blackwell. Inference now runs millions to billions of times per model, creating a memory-bandwidth\u2014not compute\u2014bottleneck. Sequential decode cannot be parallelised, fundamentally reshaping chip architectures and cloud economics.",
+    "impact": 9.2,
+    "probability": 92,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "AI",
+      "infrastructure",
+      "compute",
+      "economics",
+      "NVIDIA",
+      "inference"
+    ],
+    "source": "Inference economy structural shift from training economy",
+    "evidence": "NVIDIA $20B acquisition of Groq; 35x throughput improvement per megawatt vs Blackwell; token processing doubles every 2\u20133 months.",
+    "implications": "Training-era metrics (parameter count, FLOP/s) become obsolete. Inference efficiency becomes the new moat. Cloud and hardware incumbents must retool architectures urgently."
+  },
+  {
+    "id": 2,
+    "title": "China\u2019s 3\u20135x AI Productivity Gap",
+    "category": "AI & Technology",
+    "subcategory": "AI Adoption",
+    "description": "China is normalising AI agent adoption at societal scale. 83% of Chinese citizens see AI as beneficial versus 39% in the US. Top AI users are achieving 3\u20135x productivity over non-users, creating structural workforce divergence. Agentic AI is not just a tool but a national strategic priority embedded in public and industrial culture.",
+    "impact": 8.8,
+    "probability": 78,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "AI",
+      "geopolitics",
+      "productivity",
+      "China",
+      "adoption"
+    ],
+    "source": "China agentic nation as AI adoption pressure signal",
+    "evidence": "83% AI beneficial perception in China vs 39% US; 3\u20135x documented productivity gap for top AI users; agentic AI normalised nationally.",
+    "implications": "Workforce and national competitiveness divergence accelerates. Western firms face pressure to match adoption pace or accept structural disadvantage."
+  },
+  {
+    "id": 3,
+    "title": "Frontier Model Tenure Shortening",
+    "category": "AI & Technology",
+    "subcategory": "AI Economics",
+    "description": "Frontier AI models are functioning as rapidly depreciating infrastructure assets. GPT-5 analysis: $6.1B lifetime revenue against $6.8B cost, operating margin -11%. Model tenure is shortening to 3\u20134 months. The economics of frontier model development are structurally challenged without massive API lock-in or scale advantages.",
+    "impact": 8.0,
+    "probability": 85,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "AI",
+      "economics",
+      "valuation",
+      "infrastructure",
+      "frontier"
+    ],
+    "source": "Frontier models as rapidly depreciating infrastructure",
+    "evidence": "GPT-5 operating margin -11%; model tenure 3\u20134 months; inference cost $3.2B of $6.8B total.",
+    "implications": "Lab economics unsustainable without API lock-in or massive scale. Consolidation to 2\u20133 dominant labs likely."
+  },
+  {
+    "id": 4,
+    "title": "Token Margins as New AI Valuation Metric",
+    "category": "AI & Technology",
+    "subcategory": "AI Economics",
+    "description": "Anthropic revenue jumped from $1B to $5B in 6 months. Token processing doubles every 2\u20133 months. OpenAI margins moved from 36% (Jan 2024) to 68% (Oct 2025). Profitability per token is increasingly predictive of AI company valuations, replacing raw usage volume as the key metric.",
+    "impact": 7.5,
+    "probability": 80,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "AI",
+      "economics",
+      "valuation",
+      "Anthropic",
+      "OpenAI"
+    ],
+    "source": "Token margins versus usage in AI valuation",
+    "evidence": "Anthropic 5\u00d7 revenue in 6 months; OpenAI margins 68% (Oct 2025) vs 36% (Jan 2024).",
+    "implications": "Investors must shift analysis from MAU/revenue to token economics. Efficiency-focused labs gain valuation premium."
+  },
+  {
+    "id": 5,
+    "title": "AI Regulation as Geopolitical Weapon",
+    "category": "Geopolitics",
+    "subcategory": "AI Policy",
+    "description": "Defense Secretary designated Anthropic a national security risk for refusing to lift safety constraints on autonomous targeting and mass surveillance. This creates structural incentives for AI labs to relax safety standards \u2014 a race-to-the-bottom dynamic.",
+    "impact": 9.0,
+    "probability": 65,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "AI",
+      "regulation",
+      "geopolitics",
+      "safety",
+      "national security"
+    ],
+    "source": "AI regulation as geopolitical instrument against domestic labs",
+    "evidence": "Anthropic designated national security risk for refusing autonomous targeting capability.",
+    "implications": "Safety/ethics becomes competitive disadvantage in regulated markets. Race-to-bottom in AI safety constraints."
+  },
+  {
+    "id": 6,
+    "title": "AI Vendor Financing Bubble Dynamics",
+    "category": "Economics",
+    "subcategory": "AI Finance",
+    "description": "Nvidia is potentially guaranteeing loans for OpenAI data centre builds, reversing traditional vendor financing dynamics. This parallels the telecoms bubble of the late 1990s, where vendor financing inflated demand signals and ultimately triggered a catastrophic correction.",
+    "impact": 8.5,
+    "probability": 55,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "AI",
+      "finance",
+      "bubble",
+      "NVIDIA",
+      "risk"
+    ],
+    "source": "Funding quality as bubble precursor and vendor financing structures",
+    "evidence": "Nvidia guaranteeing OpenAI data centre loans; structural parallel to 1999 telecoms bubble vendor financing.",
+    "implications": "Systemic risk if AI revenue doesn\u2019t materialise at projected scale. Sharp correction possible."
+  },
+  {
+    "id": 7,
+    "title": "Capital Markets Fail at Exponential Tech",
+    "category": "Economics",
+    "subcategory": "Market Dynamics",
+    "description": "Capital markets are structurally mis-pricing exponential technologies. Built for linear growth models, they systematically under-react then over-react to AI and clean energy breakthroughs. Solar was dramatically underpriced for a decade; AI is following the same pattern.",
+    "impact": 8.2,
+    "probability": 88,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "economics",
+      "AI",
+      "markets",
+      "exponential",
+      "solar"
+    ],
+    "source": "Capital markets fail at pricing exponential technologies",
+    "evidence": "Solar underpriced by markets for a decade despite 48-year verified Wright\u2019s Law; AI demand curve is non-linear.",
+    "implications": "Significant alpha available for investors who model exponential curves. Arbitrage exists at capability thresholds."
+  },
+  {
+    "id": 8,
+    "title": "Solar Supercycle Self-Reinforcing Loop",
+    "category": "Energy",
+    "subcategory": "Solar",
+    "description": "The solar learning curve is self-reinforcing: lower cost enables new markets, which drive more demand, which drives more production, which drives further cost reduction. Solar at 3\u00a2/kWh enables desalination at ~10\u00a2/m\u00b3. Below 2\u00a2/kWh unlocks green hydrogen at $1.50\u20133.00/kg. The supercycle is now self-sustaining and accelerating.",
+    "impact": 9.8,
+    "probability": 96,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "solar",
+      "energy transition",
+      "learning curve",
+      "cost",
+      "hydrogen",
+      "desalination"
+    ],
+    "source": "Solar supercycle as self-reinforcing energy transition",
+    "evidence": "Solar at 3\u00a2/kWh now; Wright\u2019s Law 48-year track record at 23.7% per doubling; sub-2\u00a2/kWh unlocks green H2.",
+    "implications": "Fossil fuel demand destruction is accelerating and structural, not cyclical. New industries unlocked by cheap electrons."
+  },
+  {
+    "id": 9,
+    "title": "Depletion vs Learning Curve Asymmetry",
+    "category": "Energy",
+    "subcategory": "Energy Economics",
+    "description": "Oil follows a depletion curve \u2014 extract more, get less, pay more. Solar follows a learning curve \u2014 make more, get cheaper. These curves crossed a decade ago and the asymmetry compounds with scale. Solar went from $1,000/W (1958) to $0.07/W (2026).",
+    "impact": 9.5,
+    "probability": 98,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "energy transition",
+      "solar",
+      "fossil fuels",
+      "economics",
+      "stranded assets"
+    ],
+    "source": "Depletion curve vs learning curve as energy transition asymmetry",
+    "evidence": "Solar $1,000/W (1958) \u2192 $0.07/W (2026); 48-year learning rate at 23.7% verified.",
+    "implications": "Fossil fuel asset stranding is structural not cyclical. Capital allocation to fossil fuels risks permanent impairment."
+  },
+  {
+    "id": 10,
+    "title": "Renewables as Geopolitical Hedge",
+    "category": "Geopolitics",
+    "subcategory": "Energy Security",
+    "description": "Pakistan imported 17GW of solar in a single year and saved $6.3B (1.7% of GDP) during the 2026 Iran/Hormuz oil shock. Renewables localise power \u2014 you cannot embargo the sun. Energy independence via solar is now cheaper and faster than energy security via diplomacy.",
+    "impact": 8.8,
+    "probability": 90,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "renewables",
+      "geopolitics",
+      "energy security",
+      "solar",
+      "Pakistan"
+    ],
+    "source": "Pakistan solar shield as fossil fuel independence hedge",
+    "evidence": "$6.3B savings during Hormuz oil shock; 17GW solar installed in one year; 1.7% of GDP protected.",
+    "implications": "Renewable adoption accelerates as geopolitical risk hedge. Petrostates face accelerating revenue risk."
+  },
+  {
+    "id": 11,
+    "title": "Critical Minerals as Transition Bottleneck",
+    "category": "Energy",
+    "subcategory": "Supply Chain",
+    "description": "$2.3T clean energy transition investment in 2025 (+8% YoY) is straining copper, lithium, and cobalt supply chains. Supply is geopolitically concentrated and cannot scale fast enough. Critical minerals are becoming the binding constraint on net zero timelines.",
+    "impact": 8.0,
+    "probability": 92,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "critical minerals",
+      "supply chain",
+      "energy transition",
+      "geopolitics",
+      "copper",
+      "lithium"
+    ],
+    "source": "Critical minerals as clean energy bottleneck",
+    "evidence": "$2.3T investment straining mineral supply in 2025; geopolitically concentrated processing capacity.",
+    "implications": "Mineral processing capability becomes strategic asset. Recycling and substitution R&D is urgent."
+  },
+  {
+    "id": 12,
+    "title": "Battery Storage Exceeds Nuclear Peak Output",
+    "category": "Energy",
+    "subcategory": "Storage",
+    "description": "California\u2019s aggregated battery storage now exceeds nuclear power output on peak demand events. Battery-based storage is seeing 7\u20138% compounding improvement per year \u2014 not via breakthroughs, but through sustained manufacturing and chemistry optimisation.",
+    "impact": 8.5,
+    "probability": 95,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "batteries",
+      "storage",
+      "grid",
+      "nuclear",
+      "California"
+    ],
+    "source": "Batteries note",
+    "evidence": "California battery dispatch exceeded nuclear on peak demand events; 7\u20138% compounding improvement per year.",
+    "implications": "Grid architecture fundamentally changes \u2014 intermittency is solved at scale. Baseload model obsolete."
+  },
+  {
+    "id": 13,
+    "title": "Green Hydrogen Economics Convergence",
+    "category": "Energy",
+    "subcategory": "Hydrogen",
+    "description": "Green hydrogen LCOH is dominated by electricity costs. Convergence of green and blue H2 requires low electricity cost plus higher blue H2 delivery costs. Sub-2\u00a2/kWh electricity unlocks $1.50\u20133.00/kg green hydrogen \u2014 the crossover point for industrial competitiveness.",
+    "impact": 8.2,
+    "probability": 60,
+    "horizon": "medium",
+    "horizonLabel": "Medium (3\u20137yr)",
+    "tags": [
+      "hydrogen",
+      "green hydrogen",
+      "energy transition",
+      "LCOH",
+      "electrolysis"
+    ],
+    "source": "Economics of green hydrogen",
+    "evidence": "LCOH dominated by electricity costs; sub-2\u00a2/kWh unlocks $1.50\u20133/kg H2; offshore wind best cost/load-factor.",
+    "implications": "Green H2 becomes competitive if solar supercycle continues. Industrial decarbonisation unlocked at scale."
+  },
+  {
+    "id": 14,
+    "title": "Nuclear Fusion Net Gain This Decade",
+    "category": "Energy",
+    "subcategory": "Nuclear",
+    "description": "NIF has confirmed confidence in achieving net energy gain this decade. DeepMind ML is controlling dual plasma blobs to physical limits (Nature publication). First Light Fusion is using a projectile/railgun approach with 100,000+ simulations per experimental campaign.",
+    "impact": 9.5,
+    "probability": 38,
+    "horizon": "medium",
+    "horizonLabel": "Medium (3\u20137yr)",
+    "tags": [
+      "nuclear fusion",
+      "fusion",
+      "breakthrough",
+      "energy",
+      "DeepMind",
+      "NIF"
+    ],
+    "source": "Nuclear fusion note",
+    "evidence": "NIF net gain confidence published; DeepMind plasma control in Nature; First Light railgun approach operational.",
+    "implications": "If achieved, transforms every energy-intensive industry. Energy abundance scenario becomes plausible."
+  },
+  {
+    "id": 15,
+    "title": "UK Offshore Wind 86GW Pipeline",
+    "category": "Energy",
+    "subcategory": "Wind",
+    "description": "UK offshore wind pipeline has reached 86GW \u2014 8\u00d7 current operational capacity. Eight regional clusters across UK waters. ScotWind awarded 15GW of floating wind. Chinese manufacturers are now entering at 50% of Western turbine prices.",
+    "impact": 7.5,
+    "probability": 72,
+    "horizon": "medium",
+    "horizonLabel": "Medium (3\u20137yr)",
+    "tags": [
+      "offshore wind",
+      "UK",
+      "floating wind",
+      "energy",
+      "supply chain",
+      "Scotland"
+    ],
+    "source": "UK offshore wind note",
+    "evidence": "86GW pipeline; ScotWind 15GW awarded; Chinese turbines at 50% Western price; Mingyang securing European contracts.",
+    "implications": "UK energy security transformation possible. Supply chain development is urgently needed."
+  },
+  {
+    "id": 16,
+    "title": "Floating Offshore Wind Scaling Threshold",
+    "category": "Energy",
+    "subcategory": "Wind",
+    "description": "40 competing platform designs are in development for floating offshore wind, but no project above 100MW has been deployed. The ScotWind 15GW award creates the demand signal needed to trigger supply chain investment at scale.",
+    "impact": 7.8,
+    "probability": 65,
+    "horizon": "medium",
+    "horizonLabel": "Medium (3\u20137yr)",
+    "tags": [
+      "floating wind",
+      "offshore wind",
+      "energy",
+      "supply chain",
+      "technology"
+    ],
+    "source": "Floating offshore wind note",
+    "evidence": "40 competing platform designs; no projects >100MW deployed; 15GW ScotWind demand signal exists.",
+    "implications": "First movers in floating wind supply chain capture disproportionate value as technology consolidates."
+  },
+  {
+    "id": 17,
+    "title": "Interdependence Over Sovereignty Strategy",
+    "category": "Geopolitics",
+    "subcategory": "Technology Strategy",
+    "description": "Owning an indispensable layer in an interdependent technology stack is more strategically powerful than pursuing full sovereignty. The US is spending $12B to replicate TSMC in Arizona but will lag Taiwan\u2019s own operations. ASML controls EUV lithography and is irreplaceable.",
+    "impact": 9.0,
+    "probability": 82,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "geopolitics",
+      "technology",
+      "semiconductors",
+      "sovereignty",
+      "TSMC",
+      "ASML"
+    ],
+    "source": "Interdependence over sovereignty as technology strategy",
+    "evidence": "ASML EUV monopoly; US $12B TSMC replication lagging Taiwan; China solar dominance via manufacturing scale.",
+    "implications": "Strategic bottleneck control beats full-stack sovereignty. Chokepoint economics become dominant strategy."
+  },
+  {
+    "id": 18,
+    "title": "China\u2019s Solar Manufacturing Dominance",
+    "category": "Geopolitics",
+    "subcategory": "Clean Energy",
+    "description": "China dominates solar via learning-curve deepening \u2014 manufacturing at a scale that Western competitors cannot match economically. Chinese wind manufacturers are entering European markets at half Western turbine prices. Mingyang secured an 11MW floating wind order in Europe.",
+    "impact": 8.5,
+    "probability": 95,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "China",
+      "solar",
+      "manufacturing",
+      "clean energy",
+      "wind",
+      "supply chain"
+    ],
+    "source": "China\u2019s role in offshore wind",
+    "evidence": "Chinese turbines at 50% of Western price; Mingyang securing European floating wind contracts.",
+    "implications": "Western clean energy supply chains under severe pressure. Policy responses risk trade-off between climate and strategic autonomy."
+  },
+  {
+    "id": 19,
+    "title": "China Tech Law Industrial Divergence",
+    "category": "Geopolitics",
+    "subcategory": "Technology Policy",
+    "description": "Beijing actively restrains internet platform companies while dynamically supporting semiconductors, renewables, and AI. This creates a bifurcated Chinese tech landscape with focused capability accumulation in sectors that matter geopolitically.",
+    "impact": 7.2,
+    "probability": 88,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "China",
+      "technology",
+      "policy",
+      "regulation",
+      "industrial"
+    ],
+    "source": "China tech law note",
+    "evidence": "Platform company restraint concurrent with semiconductor and renewables surge.",
+    "implications": "China\u2019s industrial policy creates deep capability in strategic sectors. Creates a different innovation model to Western markets."
+  },
+  {
+    "id": 20,
+    "title": "$2.3 Trillion Clean Energy Investment Wave",
+    "category": "Economics",
+    "subcategory": "Investment",
+    "description": "$2.3T of clean energy transition investment flowed in 2025 \u2014 up 8% year-on-year \u2014 representing the largest redirection of capital in industrial history. This investment wave is simultaneously straining critical mineral supply chains and creating massive demand signals across clean technology value chains.",
+    "impact": 9.2,
+    "probability": 98,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "investment",
+      "clean energy",
+      "capital",
+      "transition",
+      "infrastructure"
+    ],
+    "source": "Critical minerals as clean energy bottleneck",
+    "evidence": "$2.3T clean energy investment in 2025; +8% year-on-year; largest capital redirection in history.",
+    "implications": "Multi-decade capital allocation shift is underway and structural. Asset owners must align portfolios now."
+  },
+  {
+    "id": 21,
+    "title": "K-Shaped AI Productivity Divergence",
+    "category": "AI & Technology",
+    "subcategory": "AI Adoption",
+    "description": "A K-shaped divergence is emerging between AI power users (3\u20135x productivity gains) and non-adopters. This bifurcation operates at individual, firm, and national levels simultaneously. Institutional lag between early adopters and laggards is widening.",
+    "impact": 8.5,
+    "probability": 82,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "AI",
+      "productivity",
+      "labour",
+      "inequality",
+      "adoption",
+      "organisations"
+    ],
+    "source": "K-shaped divergence in AI adoption",
+    "evidence": "3\u20135x productivity gap documented for top AI users; institutional gap widening across firms.",
+    "implications": "Workforce transformation is existential for organisations that delay. Skills gap becomes structural competitive disadvantage."
+  },
+  {
+    "id": 22,
+    "title": "Agentic AI Autonomy Threshold",
+    "category": "AI & Technology",
+    "subcategory": "AI Systems",
+    "description": "The transition from AI as a tool to AI as an autonomous agent is changing organisational structures, governance requirements, and liability frameworks. The threshold where agent autonomy creates genuinely new risk categories is approaching.",
+    "impact": 9.0,
+    "probability": 75,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "AI",
+      "agents",
+      "autonomy",
+      "risk",
+      "governance",
+      "liability"
+    ],
+    "source": "Agentic autonomy threshold note",
+    "evidence": "Rapid deployment of autonomous agents; governance frameworks lagging capability; safety incidents emerging.",
+    "implications": "New governance frameworks urgently needed. Liability questions for autonomous agent actions unresolved."
+  },
+  {
+    "id": 23,
+    "title": "Synfuels Cost Convergence by 2050",
+    "category": "Energy",
+    "subcategory": "Fuels",
+    "description": "Synthetic fuels currently cost ~9\u00d7 conventional fuels with ~50% energy efficiency. Modelling shows convergence to 1.2\u20134\u00d7 by 2050, contingent on cheap renewable electricity and DAC cost reductions. Critical for aviation and shipping decarbonisation.",
+    "impact": 7.0,
+    "probability": 50,
+    "horizon": "long",
+    "horizonLabel": "Long (7\u201315yr)",
+    "tags": [
+      "synfuels",
+      "DAC",
+      "aviation",
+      "shipping",
+      "e-fuels",
+      "decarbonisation"
+    ],
+    "source": "Synfuels note",
+    "evidence": "9\u00d7 current cost premium; modelled convergence to 1.2\u20134\u00d7 by 2050; 50% current efficiency.",
+    "implications": "Aviation and shipping decarbonisation timelines are DAC-dependent. E-fuel investment thesis only closes if solar supercycle continues."
+  },
+  {
+    "id": 24,
+    "title": "PEM Electrolysis Scale-Up to Dominance",
+    "category": "Energy",
+    "subcategory": "Hydrogen",
+    "description": "Three electrolysis technologies are competing: Alkaline (TRL9, cheap, inflexible), SOEC (R&D stage), and PEM (TRL8\u20139, flexible, expensive materials). PEM\u2019s flexibility advantage positions it to dominate as manufacturing scale reduces material costs.",
+    "impact": 7.5,
+    "probability": 68,
+    "horizon": "medium",
+    "horizonLabel": "Medium (3\u20137yr)",
+    "tags": [
+      "electrolysis",
+      "hydrogen",
+      "manufacturing",
+      "technology",
+      "PEM"
+    ],
+    "source": "Electrolysis note",
+    "evidence": "TRL comparison: Alkaline TRL9, PEM TRL8\u20139; PEM flexibility advantage for variable renewable coupling.",
+    "implications": "PEM supply chain investment now captures long-term H2 market position. Materials cost reduction (iridium, platinum) is critical research target."
+  },
+  {
+    "id": 25,
+    "title": "Virtual Power Plants as Grid Architecture",
+    "category": "Energy",
+    "subcategory": "Grid",
+    "description": "Aggregated distributed assets \u2014 batteries, EVs, demand response \u2014 are forming virtual power plants that fundamentally disrupt the traditional utility model. California\u2019s battery precedent and the growing EV fleet are creating the infrastructure for a fully distributed grid architecture.",
+    "impact": 8.0,
+    "probability": 78,
+    "horizon": "medium",
+    "horizonLabel": "Medium (3\u20137yr)",
+    "tags": [
+      "VPP",
+      "grid",
+      "distributed energy",
+      "utilities",
+      "EVs",
+      "batteries"
+    ],
+    "source": "Energy systems notes",
+    "evidence": "California battery dispatch exceeding nuclear on peak events; growing EV fleet as controllable grid resource.",
+    "implications": "Utility business model transformation from centralised supply to distributed coordination."
+  },
+  {
+    "id": 26,
+    "title": "AI as Organisational Capability (Not Tool)",
+    "category": "AI & Technology",
+    "subcategory": "AI Adoption",
+    "description": "Organisations treating AI as an IT tool versus a core organisational capability are experiencing fundamentally different outcomes. Jensen Huang\u2019s framing: half an engineer\u2019s salary should be allocated to token budget \u2014 not centrally rationed as IT cost.",
+    "impact": 8.8,
+    "probability": 88,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "AI",
+      "organisations",
+      "strategy",
+      "productivity",
+      "Jensen Huang",
+      "transformation"
+    ],
+    "source": "AI as organisational capability note",
+    "evidence": "Jensen Huang token budget recommendation; documented outcome gap between AI-capability vs AI-tool adopters.",
+    "implications": "Strategic planning must reframe AI from cost centre to capability investment. Org design, incentives, and resource allocation must change simultaneously."
+  },
+  {
+    "id": 27,
+    "title": "Long-Duration Energy Storage Economics",
+    "category": "Energy",
+    "subcategory": "Storage",
+    "description": "Multiple LDES technologies are entering commercialisation \u2014 pumped hydro, iron-air, zinc-ion, thermal storage. New chemistries are targeting 100+ hour storage at grid scale. Seasonal storage would unlock near-100% renewable grid architectures.",
+    "impact": 8.5,
+    "probability": 65,
+    "horizon": "medium",
+    "horizonLabel": "Medium (3\u20137yr)",
+    "tags": [
+      "storage",
+      "long-duration",
+      "grid",
+      "batteries",
+      "iron-air",
+      "seasonal"
+    ],
+    "source": "Long-duration storage note",
+    "evidence": "Multiple LDES technologies entering commercialisation; pumped hydro dominates but new chemistries advancing.",
+    "implications": "Seasonal storage is the missing piece for near-100% renewable grids. First-mover advantage in dominant LDES technology is significant."
+  },
+  {
+    "id": 28,
+    "title": "Asia\u2019s Electrolyser Deployment Surge",
+    "category": "Geopolitics",
+    "subcategory": "Clean Energy",
+    "description": "Asia installed 2\u00d7 its cumulative 2021 electrolyser capacity in a single year (2022). If the same learning-curve dynamics that applied to solar apply to electrolysers, Asian manufacturing will compress global green hydrogen costs dramatically and own the supply chain.",
+    "impact": 8.0,
+    "probability": 88,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "hydrogen",
+      "Asia",
+      "China",
+      "manufacturing",
+      "electrolysis",
+      "learning curve"
+    ],
+    "source": "Hydrogen in Asia note",
+    "evidence": "Asia installed 2\u00d7 cumulative 2021 electrolyser capacity in a single year; China dominating deployment volumes.",
+    "implications": "China set to dominate electrolyser supply chain as it dominated solar. Policy intervention required now or market will consolidate to Asian manufacturers."
+  },
+  {
+    "id": 100,
+    "title": "Compute profit margins compression and AI revenue acceleration",
+    "category": "Economics",
+    "subcategory": "AI Economics",
+    "description": "AI inference margins are compressing as competition accelerates and token output doubles every 2-3 months, yet total revenue is accelerating exponentially \u2014 the combination means absolute returns can grow even as margins shrink, but only for companies with sufficient scale and cost discipline. OpenAI's compute profit margin: 68% (Oct 2025), roughly doubling from 36% in Jan 2024 Token processing\u2026",
+    "impact": 6.6,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/AI\"",
+      "\"topic/economics\"",
+      "\"topic/compute\"",
+      "AI"
+    ],
+    "source": "10 Notes/Economic/AI economics/Compute profit margins compression and AI revenue acceleration.md",
+    "evidence": "# Compute Profit Margins Compression and AI Revenue Acceleration ## Core idea AI inference margins are compressing as competition accelerates and token output doubles every 2-3 months, yet total revenue is accelerating exponentially \u2014 the combination means absolute returns can grow even as margins shrink, but only for companies with sufficient scale and cost discipline",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 101,
+    "title": "Frontier models as rapidly depreciating infrastructure",
+    "category": "Economics",
+    "subcategory": "AI Economics",
+    "description": "Frontier AI models are unlike traditional software: they depreciate rapidly as competitors release new models or successors render them obsolete. Value must be extracted before competing models enter market. This means: (1) gross margins must be high enough to recoup R&D before obsolescence, (2) model tenure is shortening (GPT-5 was outcompeted within 3 months), (3) relentless R&D spending is\u2026",
+    "impact": 6.6,
+    "probability": 47,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/AI\"",
+      "\"topic/economics\"",
+      "\"topic/valuation\"",
+      "AI"
+    ],
+    "source": "10 Notes/Economic/AI economics/Frontier models as rapidly depreciating infrastructure.md",
+    "evidence": "# Frontier Models as Rapidly Depreciating Infrastructure ## Core idea Frontier AI models are unlike traditional software: they depreciate rapidly as competitors release new models or successors render them obsolete",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 102,
+    "title": "Settlement timing vs underlying growth in AI revenues",
+    "category": "Economics",
+    "subcategory": "AI Economics",
+    "description": "Interpreting cash flows as immediate revenue is a category error in AI. Realistic payment terms (3\u20136 months post-reconciliation) exist between revenue recognition and cash collection. Markets often confuse cash timing with underlying growth trajectory. OpenAI's 2024 revenue: ~$3.7B. Leaked Microsoft payments reflect quarter-end reconciliation + payment terms, creating lag. Q-on-Q growth jumped to\u2026",
+    "impact": 5.0,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"AI",
+      "economics\"",
+      "\"revenue",
+      "analysis\"",
+      "\"financial",
+      "AI"
+    ],
+    "source": "10 Notes/Economic/AI economics/Settlement timing vs underlying growth in AI revenues.md",
+    "evidence": "## Supporting evidence OpenAI's 2024 revenue: ~$3.7B. Q-on-Q growth jumped to 65% in recent quarters after months near 20%, suggesting underlying acceleration",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 103,
+    "title": "Token budgets as workforce investment not IT cost",
+    "category": "Economics",
+    "subcategory": "AI Systems",
+    "description": "Treating AI token budgets as an IT cost center \u2014 rationalizable, kept away from business units \u2014 is the organizational equivalent of requiring engineers to book engine time through the facilities department. Tokens are a productive input as fundamental to knowledge work as electricity, office space, or salary. The organizational error most large companies are making in 2026 is misclassifying the\u2026",
+    "impact": 7.4,
+    "probability": 59,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"AI\"",
+      "\"tokens\"",
+      "\"organizational-design\"",
+      "\"workforce\"",
+      "\"investment\"",
+      "AI",
+      "investment"
+    ],
+    "source": "10 Notes/Economic/AI economics/Token budgets as workforce investment not IT cost.md",
+    "evidence": "The organizational error most large companies are making in 2026 is misclassifying the category",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 104,
+    "title": "Critical minerals as clean energy bottleneck",
+    "category": "Economics",
+    "subcategory": "Supply Chain",
+    "description": "Surging demand for transition metals \u2014 copper, lithium, cobalt \u2014 is outpacing supply chain capacity. This is a binding constraint on clean energy deployment timelines and a nexus where economic investment risk, geopolitical competition, and industrial policy intersect. Global energy transition investment reached $2.3 trillion in 2025 (+8% YoY), straining critical mineral supply chains Copper\u2026",
+    "impact": 8.2,
+    "probability": 56,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"critical",
+      "minerals\"",
+      "\"supply",
+      "chain\"",
+      "\"clean",
+      "energy\"",
+      "\"geopolitics\"",
+      "\"economics\""
+    ],
+    "source": "10 Notes/Economic/Critical minerals as clean energy bottleneck.md",
+    "evidence": "digital infrastructure) --- ## Source [[PESTEL Weekly 2026-03-08]]",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 105,
+    "title": "Capital markets fail at pricing exponential technologies",
+    "category": "Economics",
+    "subcategory": "AI Systems",
+    "description": "Capital markets were built to price linear, stable competitive structures over 3\u201310 year horizons. General-purpose exponential technologies like AI don't fit that mould \u2014 their demand curves are non-linear, their competitive dynamics are unstable, and their second-order effects are too diffuse to model. Markets therefore systematically over- and under-react. DeepSeek announcement: $1 trillion\u2026",
+    "impact": 6.2,
+    "probability": 50,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic/finance\"",
+      "\"topic/concept\"",
+      "AI"
+    ],
+    "source": "10 Notes/Economic/Finance and investing/Capital markets fail at pricing exponential technologies.md",
+    "evidence": "# Capital markets fail at pricing exponential technologies ## Core idea Capital markets were built to price linear, stable competitive structures over 3\u201310 year horizons",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 106,
+    "title": "Climate Tech VC funds",
+    "category": "Economics",
+    "subcategory": "Investment",
+    "description": "+Finance and Investing \ud83d\udcb0 Where there\u2019s great economic transformation, there\u2019s venture capitalists. Where there\u2019s great economic and planetary transformation, there\u2019s climate tech venture capitalists.\u00a0 The past few years have borne three types of emerging climate tech VCs. First, the survivors - those that persevered through Cleantech 1.0, and carried with them the lessons and burdens of the past.\u2026",
+    "impact": 8.2,
+    "probability": 71,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "AI",
+      "investment"
+    ],
+    "source": "10 Notes/Economic/Finance and investing/Climate Tech VC funds.md",
+    "evidence": "[[+Finance and Investing \ud83d\udcb0]] # Climate Tech VC funds ## Thoughts # CTVC\u2019s Climate Capital List ### 2022: An updated list of 177 climate tech venture capitalists Where there\u2019s great economic transformation, there\u2019s venture capitalists",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 107,
+    "title": "Funding quality as bubble precursor and vendor financing structures",
+    "category": "Economics",
+    "subcategory": "Market Dynamics",
+    "description": "Funding quality \u2014 the resilience and transparency of financing structures \u2014 predicts bubble risk. Vendor financing itself is not inherently problematic (GM did it successfully), but when balance sheet gymnastics become norm and opacity obscures deteriorating fundamentals, funding quality deteriorates. Early warning signs: suppliers guaranteeing customer debt, complex deal structures blending\u2026",
+    "impact": 7.4,
+    "probability": 47,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/finance\"",
+      "\"topic/bubble\"",
+      "\"topic/AI\"",
+      "AI"
+    ],
+    "source": "10 Notes/Economic/Finance and investing/Funding quality as bubble precursor and vendor financing structures.md",
+    "evidence": "# Funding Quality as Bubble Precursor and Vendor Financing Structures ## Core idea Funding quality \u2014 the resilience and transparency of financing structures \u2014 predicts bubble risk",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 108,
+    "title": "Venture Capital background",
+    "category": "Economics",
+    "subcategory": "Investment",
+    "description": "Venture Capital Is there really not much venture capital? Is there really \u201cnot enough\u201d? Why isn\u2019t there more? Let\u2019s tackle them one at a time. **Is there really not much venture capital?** According to the consultancy PwC, investors, ranging from sovereign wealth funds to rich families to the middle class and pension funds, held assets totalling about $279 trillion in 2020. Of these, $111\u2026",
+    "impact": 8.4,
+    "probability": 71,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/finance\"",
+      "\"topic\"",
+      "AI",
+      "UK",
+      "investment"
+    ],
+    "source": "10 Notes/Economic/Finance and investing/Venture Capital background.md",
+    "evidence": "Of these, $111 trillion were \u201cassets under management\u201d, that is, under the purview of the asset management industry, of which venture capital is a part. Yes, despite last year\u2019s record-breaking investment rates, which exceeded $693 billion, according to our friends at [Dealroom](https://dealroom.co/), venture capital represents less than 1% of global assets",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 109,
+    "title": "Helium supply concentration as semiconductor fabrication vulnerability",
+    "category": "Economics",
+    "subcategory": "Supply Chain",
+    "description": "Helium is an irreplaceable non-renewable gas (it escapes Earth's atmosphere permanently once vaporised) used in 20+ steps of semiconductor fabrication. Global supply is heavily concentrated in Qatar (34%), creating a geopolitical chokepoint. The Iran War's damage to the Ras Laffan facility has exposed this dependency \u2014 yet the direct cost impact on chip production remains modest because helium\u2026",
+    "impact": 8.5,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/semiconductors\"",
+      "\"topic/geopolitics\"",
+      "\"topic/supply-chain\"",
+      "\"topic/energy\"",
+      "wind",
+      "AI",
+      "supply chain"
+    ],
+    "source": "10 Notes/Economic/Helium supply concentration as semiconductor fabrication vulnerability.md",
+    "evidence": "Global supply is heavily concentrated in Qatar (34%), creating a geopolitical chokepoint",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 110,
+    "title": "Nuclear economics and Wright's Law",
+    "category": "Economics",
+    "subcategory": "Solar",
+    "description": "Nuclear power does not benefit from the exponential cost reduction dynamics that solar, batteries, and computing enjoy. Wright's Law requires large production volumes to drive learning-curve cost reductions \u2014 and nuclear builds too few units to activate this effect. SMRs are the proposed fix, but they need to reach thousands of deployed units before the learning curve meaningfully kicks in.\u2026",
+    "impact": 5.4,
+    "probability": 56,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/nuclear\"",
+      "\"topic/concept\"",
+      "solar",
+      "nuclear",
+      "AI",
+      "learning curve"
+    ],
+    "source": "10 Notes/Economic/Nuclear economics and Wright's Law.md",
+    "evidence": "# Nuclear economics and Wright's Law ## Core idea Nuclear power does not benefit from the exponential cost reduction dynamics that solar, batteries, and computing enjoy",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 111,
+    "title": "Renewable energy learning curves",
+    "category": "Economics",
+    "subcategory": "Solar",
+    "description": "+Renewable energy technology \u2600\ufe0f Learning curves \u2013 making things cheaper as we learn how to build them better \u2013 are the heart of the Exponential Age. This creates a fascinating flywheel. The faster you move to a new technology, the more rapidly that technology gets cheaper. This has ramifications for the renewable transition, Auke Hoekstra points out in this Twitter thread. The idea is to spend\u2026",
+    "impact": 5.4,
+    "probability": 56,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "hydrogen",
+      "UK",
+      "investment",
+      "learning curve",
+      "storage",
+      "offshore"
+    ],
+    "source": "10 Notes/Economic/Renewable energy learning curves.md",
+    "evidence": "This has ramifications for the renewable transition, Auke Hoekstra [points out in this Twitter thread](https://twitter.com/AukeHoekstra/status/1504205849870446594?s=20&t=hJ2Lkl01hyR-8mf5dvsYVQ). ![](https://www.exponentialview.co/content/images/2022/03/Screen-Shot-2022-03-19-at-16.00.01.png) A more formal treatment is in this paper from Oxford University\u2019s [Institute for New Economic Thinking](https://t.co/fGAXcU4lRT) from last September",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 112,
+    "title": "Software-hardware substitution: efficiency gains through algorithmic innovation",
+    "category": "Economics",
+    "subcategory": "AI Systems",
+    "description": "Sophisticated software techniques can achieve significant computational efficiency gains by reducing the raw hardware requirements to perform the same task. This decouples compute advancement from purely physical scaling and represents a fundamental lever for cost reduction under energy and capex constraints. Alibaba Cloud slashed GPU requirements for dozens of AI models (72B parameters) by 82%\u2026",
+    "impact": 7.0,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"efficiency\"",
+      "\"software\"",
+      "\"hardware\"",
+      "\"technology\"",
+      "\"scaling\"",
+      "AI"
+    ],
+    "source": "10 Notes/Economic/Software-hardware substitution curve.md",
+    "evidence": "## Connections - Related: [[AI industrialisation requires competing on energy efficiency, not just capability]] - Related: [[Constraints breed optimisation]] --- ## Source [[Exponential View - Data to start your week (2025-10-27)]]",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 113,
+    "title": "World Bank reversal on industrial policy doctrine",
+    "category": "Economics",
+    "subcategory": "Technology Strategy",
+    "description": "The World Bank has formally revised its long-held doctrine \u2014 established in the 1993 East Asian Miracle report \u2014 that \"promotion of specific industries generally did not work.\" Chief economist Indermit Gill now says industrial policy is \"more replicable than previously thought.\" This is a significant shift: an institution that taught a generation of development economists to treat industrial\u2026",
+    "impact": 6.6,
+    "probability": 65,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/economics\"",
+      "\"topic/development\"",
+      "\"topic/industrial-policy\"",
+      "\"topic/geopolitics\"",
+      "hydrogen",
+      "AI",
+      "China",
+      "investment"
+    ],
+    "source": "10 Notes/Economic/World Bank reversal on industrial policy doctrine.md",
+    "evidence": "# World Bank reversal on industrial policy doctrine ## Core idea The World Bank has formally revised its long-held doctrine \u2014 established in the 1993 East Asian Miracle report \u2014 that \"promotion of specific industries generally did not work.\" Chief economist Indermit Gill now says industrial policy is \"more replicable than previously thought.\" This is a significant shift: an institution that taught a generation of development economists to treat industrial policy as exceptional and risky has reversed course",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 114,
+    "title": "Wright's Law",
+    "category": "Economics",
+    "subcategory": "Market Dynamics",
+    "description": "+Concepts \ud83d\udd2e Wright\u2019s Law states that the costs of a new technology comes down as producers better understand how to make that technology. Early buyers of a technology pay a premium to get their hands on it \u2013 but they also _drive down the cost_ of the technology for future buyers. Take the Tesla Model 3:\u2026",
+    "impact": 6.2,
+    "probability": 53,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/concept\"",
+      "\"topic\""
+    ],
+    "source": "10 Notes/Economic/Wright's Law.md",
+    "evidence": "Take the Tesla Model 3: ![](https://www.exponentialview.co/content/images/2022/01/Capture-d--cran-2022-01-20---12.14.09.png) This cost reduction curve is a crucial dynamic of the Exponential Age \u2013 and it\u2019s absolutely critical for [[+Climate Tech]]",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 115,
+    "title": "Open energy data",
+    "category": "Energy",
+    "subcategory": "Investment",
+    "description": "+Energy technology \u2697\ufe0f **Open Data:** The International Energy Agency has announced it will begin making its data freely available for 3rd party analysis, after a decade-long community campaign calling for access to said data. \u201cWe need to know how much energy countries consume and from which sources, and how much each sector (such as electricity, road transport, aviation and heating) demands,\u201d\u2026",
+    "impact": 5.0,
+    "probability": 59,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic\"",
+      "AI",
+      "policy"
+    ],
+    "source": "10 Notes/Energy/Energy systems/Open energy data.md",
+    "evidence": "[[+Energy technology \u2697\ufe0f]] # Open energy data ## Thoughts **Open Data:** The International Energy Agency has [announced](https://twitter.com/MLiebreich/status/1507065088355749891) it will begin making its data freely available for 3rd party analysis, after a decade-long community campaign calling for access to said data",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 116,
+    "title": "Economics of green hydrogen",
+    "category": "Energy",
+    "subcategory": "Hydrogen",
+    "description": "Hydrogen **The long-term economics of bulk Green H2 appear challenging vs Blue H2, even with a strong Carbon price** !Screenshot 2022-08-09 at 09.54.57.png **Energy costs will dominate long-term LCOH** Substantial Capex/Fixed Opex reductions needed for Green H2; Blue H2 Capex reduction requirements less material If aggressive electrolyser cost reduction forecasts can be achieved, energy costs\u2026",
+    "impact": 3.4,
+    "probability": 71,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "solar",
+      "wind",
+      "hydrogen",
+      "AI",
+      "UK",
+      "grid",
+      "electrolysis"
+    ],
+    "source": "10 Notes/Energy/Hydrogen/Economics of green hydrogen.md",
+    "evidence": "[[Hydrogen]] # Economics of green hydrogen ## Thoughts **The long-term economics of bulk Green H2 appear challenging vs Blue H2, even with a strong Carbon price** ![[Screenshot 2022-08-09 at 09.54.57.png]] **Energy costs will dominate long-term LCOH** - Substantial Capex/Fixed Opex reductions needed for Green H2; Blue H2 Capex reduction requirements less material - If aggressive electrolyser cost reduction forecasts can be achieved, energy costs (gas / elec) will dominate LCOH **Electrolyser costs today are high but are forecast to fall dramatically** ![[Screenshot 2022-08-09 at 09.56.27.png]] ### Drivers of electrolyser costs - Industry electrolyser Capex forecasts are highly aggressive, achieved partially through economies of scale (and also [[Wright's Law]]) - Other electrolyser project Capex is material and often not fully quantified in literature (e.g",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 119,
+    "title": "Depletion curve vs learning curve as energy transition asymmetry",
+    "category": "Energy",
+    "subcategory": "Solar",
+    "description": "Oil follows a depletion curve: extract more, get less, pay more. Solar follows a learning curve: make more, get cheaper. These two curves crossed a decade ago and only one is still falling. This is the structural mechanism underlying the energy transition \u2014 not policy, not climate ambition, but the irreversible economic logic of two opposing curves. Strait of Hormuz closure: 20 million\u2026",
+    "impact": 8.1,
+    "probability": 56,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"solar\"",
+      "\"fossil",
+      "fuels\"",
+      "\"energy",
+      "transition\"",
+      "\"learning",
+      "curves\"",
+      "\"scarcity\""
+    ],
+    "source": "10 Notes/Energy/Renewable energy/Depletion curve vs learning curve as energy transition asymmetry.md",
+    "evidence": "# Depletion curve vs learning curve as energy transition asymmetry ## Core idea Oil follows a depletion curve: extract more, get less, pay more",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 120,
+    "title": "Digital solar",
+    "category": "Energy",
+    "subcategory": "AI Systems",
+    "description": "+Renewable energy technology \u2600\ufe0f **Digital Solar:** Space-constrained Indian apartment dwellers are finding innovative ways to participate in solar power generation, including a tokenised ownership platform called SundayGrids, recently profiled by _Reuters_. Participants pay to help fund the installation of large scale solar generation on the rooftops of schools, shopping malls, and other partner\u2026",
+    "impact": 5.0,
+    "probability": 50,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic\"",
+      "solar",
+      "AI",
+      "grid"
+    ],
+    "source": "10 Notes/Energy/Renewable energy/Digital solar.md",
+    "evidence": "[[+Renewable energy technology \u2600\ufe0f]] # Digital solar ## Thoughts **Digital Solar:** Space-constrained Indian apartment dwellers are finding innovative ways to participate in solar power generation, including a tokenised ownership platform called [SundayGrids](https://www.sundaygrids.com/), recently [profiled by _Reuters_](https://www.reuters.com/article/india-solar-tech/feature-urban-indians-beat-space-crunch-by-investing-in-digital-solar-power-idUSL4N2V34IG?utm_source=twitter&utm_medium=wrienergy&utm_campaign=socialmedia&utm_term=738f0cba-644d-41c8-8cb1-405c052747fd)",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 121,
+    "title": "Energy transition",
+    "category": "Energy",
+    "subcategory": "Solar",
+    "description": "+Renewable energy technology \u2600\ufe0f Solar PV has already become the cheapest energy source in history, alongside wind Since 1976, solar costs (in dollars per watt) have fallen an average of over 12% per year. Since first being commercialized in 1991, Lithium-ion batteries costs (in dollars per kWh) have fallen a similar 12.9% per year on average. **These falling solar, wind and Batteries prices have\u2026",
+    "impact": 6.9,
+    "probability": 90,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "solar",
+      "wind",
+      "battery",
+      "AI",
+      "China",
+      "supply chain",
+      "grid"
+    ],
+    "source": "10 Notes/Energy/Renewable energy/Energy transition.md",
+    "evidence": "Since first being commercialized in 1991, [[Lithium-ion]] batteries costs (in dollars per kWh) [have fallen](https://ourworldindata.org/uploads/2021/06/Battery-cost-learning-curve.png) a similar 12.9% per year on average. ![](https://www.tsungxu.com/content/images/2022/02/global-capacity-post.jpeg) Made using data from [IRENA](http://pxweb.irena.org/pxweb/en/IRENASTAT/IRENASTAT__Power%20Capacity%20and%20Generation/ELECCAP_2021_cycle2.px/)",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 123,
+    "title": "Pakistan solar shield as fossil fuel independence hedge",
+    "category": "Energy",
+    "subcategory": "Energy Security",
+    "description": "Pakistan's rapid solar build-out \u2014 17GW of panels imported in a single year against a total generation capacity of 46GW \u2014 acted as a strategic shield during the 2026 Iran/Hormuz oil shock. The solar transformation reduced Pakistan's exposure to fossil fuel price rises by at least $6.3 billion, equivalent to 1.7% of GDP. Renewables localize power: once the panel is installed, no external actor can\u2026",
+    "impact": 8.2,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"solar\"",
+      "\"energy-security\"",
+      "\"geopolitics\"",
+      "\"renewables\"",
+      "\"Pakistan\"",
+      "solar",
+      "AI",
+      "learning curve"
+    ],
+    "source": "10 Notes/Energy/Renewable energy/Pakistan solar shield as fossil fuel independence hedge.md",
+    "evidence": "The solar transformation reduced Pakistan's exposure to fossil fuel price rises by at least $6.3 billion, equivalent to 1.7% of GDP",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 124,
+    "title": "Solar Wright's Law and the 23.7% learning rate",
+    "category": "Energy",
+    "subcategory": "AI Economics",
+    "description": "Solar photovoltaic follows Wright's Law with remarkable consistency: every doubling of cumulative production cuts costs by 23.7%. This rate has held across 48 years and multiple independent studies. Because solar is manufactured (not extracted), it operates on a predictable learning curve \u2014 unlike fossil fuels, which face depletion curves. This is not a coincidence; it is a structural difference\u2026",
+    "impact": 7.4,
+    "probability": 51,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"solar\"",
+      "\"Wright's",
+      "Law\"",
+      "\"learning",
+      "curves\"",
+      "\"energy\"",
+      "\"manufacturing\"",
+      "solar"
+    ],
+    "source": "10 Notes/Energy/Renewable energy/Solar Wright's Law and the 23.7% learning rate.md",
+    "evidence": "# Solar Wright's Law and the 23.7% learning rate ## Core idea Solar photovoltaic follows Wright's Law with remarkable consistency: every doubling of cumulative production cuts costs by 23.7%",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 125,
+    "title": "Solar price thresholds unlock sequential markets",
+    "category": "Energy",
+    "subcategory": "Market Dynamics",
+    "description": "As solar falls through successive price floors, it unlocks entirely new industries that were previously uneconomic. Each new market accelerates production, which drives the next cost reduction. The supercycle is not linear \u2014 it is a cascade of threshold crossings, each one opening a market that funds the next. **At 3\u00a2/kWh:** Desalination becomes economically viable \u2014 energy cost falls to ~10\u00a2/m\u00b3;\u2026",
+    "impact": 6.2,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"solar\"",
+      "\"energy\"",
+      "\"markets\"",
+      "\"desalination\"",
+      "\"hydrogen\"",
+      "\"carbon",
+      "capture\"",
+      "solar"
+    ],
+    "source": "10 Notes/Energy/Renewable energy/Solar price thresholds unlock sequential markets.md",
+    "evidence": "# Solar price thresholds unlock sequential markets ## Core idea As solar falls through successive price floors, it unlocks entirely new industries that were previously uneconomic",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 126,
+    "title": "Solar supercycle as self-reinforcing energy transition",
+    "category": "Energy",
+    "subcategory": "Solar",
+    "description": "Solar follows a self-reinforcing flywheel: lower cost \u2192 new markets \u2192 more demand \u2192 more production \u2192 lower cost. Each threshold opens a market that did not exist at the previous price point. This is the energy equivalent of Moore's Law for microprocessors and it is structurally immune to geopolitical chokepoints. Solar now generates 9.5% of global electricity (up from 1% a decade ago), but is\u2026",
+    "impact": 6.2,
+    "probability": 62,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"solar\"",
+      "\"energy\"",
+      "\"learning",
+      "curves\"",
+      "\"Wright's",
+      "Law\"",
+      "\"transition\"",
+      "solar"
+    ],
+    "source": "10 Notes/Energy/Renewable energy/Solar supercycle as self-reinforcing energy transition.md",
+    "evidence": "# Solar supercycle as self-reinforcing energy transition ## Core idea Solar follows a self-reinforcing flywheel: lower cost \u2192 new markets \u2192 more demand \u2192 more production \u2192 lower cost",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 128,
+    "title": "UK renewables displacing gas at scale - March 2026 milestone",
+    "category": "Energy",
+    "subcategory": "Energy Security",
+    "description": "March 2026 marked a concrete inflection point where the UK's renewables buildout demonstrably reduced gas dependency at scale \u2014 not just in capacity terms but in actual market outcomes. Wind and solar displaced 21 TWh of gas-equivalent, saved \u00a31 billion in import costs, and reduced the frequency of gas price-setting by 75% versus the 2022 crisis peak. This is the energy security dividend of the\u2026",
+    "impact": 8.9,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/energy\"",
+      "\"topic/renewables\"",
+      "\"topic/UK\"",
+      "\"topic/energy-security\"",
+      "solar",
+      "wind",
+      "battery",
+      "UK"
+    ],
+    "source": "10 Notes/Energy/Renewable energy/UK renewables displacing gas at scale - March 2026 milestone.md",
+    "evidence": "Wind and solar displaced 21 TWh of gas-equivalent, saved \u00a31 billion in import costs, and reduced the frequency of gas price-setting by 75% versus the 2022 crisis peak. The \u00a31B monthly saving in gas imports provides a compelling counter-narrative to the \"renewables are expensive\" argument, and the declining frequency of gas price-setting signals that the UK electricity market is structurally changing",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 129,
+    "title": "Battery storage for grid",
+    "category": "Energy",
+    "subcategory": "Storage",
+    "description": "+Renewable energy technology \u2600\ufe0f Energy storage installations around the world will reach a cumulative 358 gigawatts/1,028 gigawatt-hours by the end of 2030, more than twenty times larger than the 17 gigawatts/34 gigawatt-hours online at the end of 2020, according to the latest forecast from research company BloombergNEF (BNEF). This boom in stationary energy storage will require more than $262\u2026",
+    "impact": 9.2,
+    "probability": 71,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "solar",
+      "wind",
+      "battery",
+      "AI",
+      "China",
+      "investment",
+      "supply chain"
+    ],
+    "source": "10 Notes/Energy/Storage/Battery storage for grid.md",
+    "evidence": "This boom in stationary energy storage will require more than $262 billion of investment, BNEF estimates. BloombergNEF\u2019s\u00a0_2021 Global Energy Storage Outlook_\u00a0estimates that 345 gigawatts/999 gigawatt-hours of new energy storage capacity will be added globally between 2021 and 2030, which is more than Japan\u2019s entire power generation capacity in 2020",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 131,
+    "title": "Carbon removal markets",
+    "category": "Environment",
+    "subcategory": "Investment",
+    "description": "+Climate Tech As companies scramble to stake out a path to net zero, voluntary carbon credits \u2013 tradable certificates that show companies have funded the reduction of atmospheric CO2 \u2013 have grown in popularity. The theory is that a company can buy credits to fund projects that help curb emissions, thus compensating for their own pollutive output.\u2026",
+    "impact": 8.2,
+    "probability": 74,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"idea_personal\"",
+      "\"topic\"",
+      "\"topic/climate\"",
+      "AI",
+      "learning curve"
+    ],
+    "source": "10 Notes/Environmental/Climate/Carbon removal markets.md",
+    "evidence": "![](https://www.exponentialview.co/content/images/2022/01/Capture-d--cran-2022-01-20---12.12.47.png) Right now, carbon removal is not a big industry. But if we\u2019re to hit net-zero emissions by 2050, it will have to be",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 132,
+    "title": "Carbon removal methods",
+    "category": "Environment",
+    "subcategory": "Market Dynamics",
+    "description": "+Climate Tech **Nature based** - a natural process we can enhance **Tech-enabled nature based**\u00a0- a natural process that gets a little help with some kind of tech process **Technology based** - something that is all tech or that wouldn't happen naturally Examples: Reforestation (Tree planting where they've been chopped down) Afforestation (planting trees where there weren't any before)\u2026",
+    "impact": 7.4,
+    "probability": 68,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"idea_personal\"",
+      "\"topic\"",
+      "\"topic/climate\"",
+      "AI",
+      "grid",
+      "storage",
+      "policy"
+    ],
+    "source": "10 Notes/Environmental/Climate/Carbon removal methods.md",
+    "evidence": "Since intensive agriculture became the norm in the 1980s, our soils have become massively depleted",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 133,
+    "title": "Green tech in China",
+    "category": "Environment",
+    "subcategory": "Investment",
+    "description": "+Climate Tech This is for the Next Tech conference wrap up in Shanghai. Main topics to cover: Carbon neutral goals Structure of Chinese market Particularly interesting features ESCOs Energy efficiency Consumer engagament State Grid Startups Structure of Chinese market Particularly interesting features China has the world\u2019s largest and fastest growing ESCO market Energy service companies (ESCOs)\u2026",
+    "impact": 8.1,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "\"topic/climate\"",
+      "AI",
+      "China",
+      "investment",
+      "grid",
+      "storage"
+    ],
+    "source": "10 Notes/Environmental/Climate/Green tech in China.md",
+    "evidence": "The Guideline for Green and Circular Economy set out methods to set China on course to meet the 2060 target. In March 2021, the government unveiled the draft outline of the 14th Five Year Plan (2021-2025), the first Plan since the country set a pathway to a modern, carbon-neutral economy",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 134,
+    "title": "Net Zero",
+    "category": "Environment",
+    "subcategory": "AI Systems",
+    "description": "+Climate Tech **What is this? What have I read or heard?** Bloomberg NEF released its annual New Energy Outlook, which outlines three transition scenarios to Net Zero: a green path (lots of renewables), a red path (nukes) and a grey path (more carbon capture, less defossilisation). !Screen Shot 2021-08-07 at 12.13.05 PM.png Cities are the key to achieving net-zero emissions targets by 2050,\u2026",
+    "impact": 6.2,
+    "probability": 53,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "\"topic/climate\"",
+      "AI",
+      "UK",
+      "investment",
+      "grid",
+      "storage"
+    ],
+    "source": "10 Notes/Environmental/Climate/Net Zero.md",
+    "evidence": "![[Screen Shot 2021-08-07 at 12.13.05 PM.png]] Cities are the key to achieving net-zero emissions targets by 2050, argues the IEA (and me!). This is a very good overview.) ![[Screen Shot 2021-08-07 at 12.41.04 PM 1.png]] The way out is to hit zero emissions within 29 years",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 135,
+    "title": "Net zero as poorly communicated opportunity",
+    "category": "Environment",
+    "subcategory": "AI Adoption",
+    "description": "Net zero is consistently framed as a sacrifice \u2014 cost, restriction, disruption \u2014 when it could instead be sold through its practical co-benefits: cheaper energy bills, cleaner air, warmer homes. The adoption dynamic changes when the immediate, tangible gains are made obvious rather than the abstract long-run climate goal. Renewable technologies are already cheaper than thermal alternatives \u2014 the\u2026",
+    "impact": 7.4,
+    "probability": 50,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/climate\"",
+      "\"topic/concept\"",
+      "AI",
+      "UK",
+      "policy"
+    ],
+    "source": "10 Notes/Environmental/Climate/Net zero as poorly communicated opportunity.md",
+    "evidence": "# Net zero as poorly communicated opportunity ## Core idea Net zero is consistently framed as a sacrifice \u2014 cost, restriction, disruption \u2014 when it could instead be sold through its practical co-benefits: cheaper energy bills, cleaner air, warmer homes",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 136,
+    "title": "Tree planting",
+    "category": "Environment",
+    "subcategory": "Investment",
+    "description": "+Climate Tech Venture Capital background funding is not going to reforestation/aforestation despite its potential. ![](https://lh5.googleusercontent.com/bPjWFYj8Yi81dNt4KGUDNJUjZMxll6vzfM7sAy5El-EZjSXpCOx_So8osPpdPn7agTZXS00vZrCNSxycDOWHj3eV-z4I8Fl2hcnuow4zTkz3mSr-BYNpoEElgU_bereJRV3m4X_W) Source: Climate Tech VC Wind and solar energy are instrumental in reducing GHG, and cheap. Where it gets\u2026",
+    "impact": 6.5,
+    "probability": 53,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic\"",
+      "\"topic/climate\"",
+      "solar",
+      "wind",
+      "AI"
+    ],
+    "source": "10 Notes/Environmental/Nature/Tree planting.md",
+    "evidence": "[[+Climate Tech]] # Tree planting ## Thoughts [[Venture Capital background]] funding is not going to reforestation/aforestation despite its potential",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 137,
+    "title": "AI regulation as geopolitical instrument against domestic labs",
+    "category": "Geopolitics",
+    "subcategory": "AI Systems",
+    "description": "National security supply chain rules \u2014 originally designed to constrain foreign hardware and semiconductor supply chains \u2014 are being repurposed as instruments of executive power against domestic AI companies that refuse to lift safety constraints. The US thereby became, by a significant margin, the world's most aggressive AI regulator. Defence Secretary Pete Hegseth designated Anthropic a\u2026",
+    "impact": 6.6,
+    "probability": 56,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"AI\"",
+      "\"regulation\"",
+      "\"geopolitics\"",
+      "\"Anthropic\"",
+      "\"US",
+      "policy\"",
+      "\"national",
+      "security\""
+    ],
+    "source": "10 Notes/Political/AI regulation as geopolitical instrument against domestic labs.md",
+    "evidence": "# AI regulation as geopolitical instrument against domestic labs ## Core idea National security supply chain rules \u2014 originally designed to constrain foreign hardware and semiconductor supply chains \u2014 are being repurposed as instruments of executive power against domestic AI companies that refuse to lift safety constraints",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 138,
+    "title": "China agentic nation as AI adoption pressure signal",
+    "category": "Geopolitics",
+    "subcategory": "AI Adoption",
+    "description": "China is normalising AI agent adoption at a societal scale, driven by government subsidies, media narrative (\"learn AI, get a high-paying job\"), and platform infrastructure. The resulting adoption gap between China (83% see AI as beneficial) and the US (39%) will compound into a competitive productivity gap. ~1,000 people queued outside Tencent HQ to get OpenClaw installed; paid installers\u2026",
+    "impact": 4.6,
+    "probability": 59,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"AI\"",
+      "\"China\"",
+      "\"geopolitics\"",
+      "\"adoption\"",
+      "\"agents\"",
+      "AI",
+      "China"
+    ],
+    "source": "10 Notes/Political/China agentic nation as AI adoption pressure signal.md",
+    "evidence": "The resulting adoption gap between China (83% see AI as beneficial) and the US (39%) will compound into a competitive productivity gap",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 139,
+    "title": "Climate policy and regulation",
+    "category": "Geopolitics",
+    "subcategory": "Wind",
+    "description": "+Technologies and concepts A summary of major Climate change policy in key markets. ------ **The Paris Agreement** (2015) - Historic agreement signed by almost all nations to limit global warming to well below 2\u00b0C and pursue efforts to limit to 1.5\u00b0C. Established commitments by countries through Nationally Determined Contributions (NDCs), reporting requirements, and a ratcheting mechanism.\u2026",
+    "impact": 6.6,
+    "probability": 62,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "solar",
+      "wind",
+      "nuclear",
+      "AI",
+      "China",
+      "UK",
+      "offshore"
+    ],
+    "source": "10 Notes/Political/Climate policy/+Climate policy and regulation.md",
+    "evidence": "------ ## Themes ### Global COP agreements - **[[The Paris Agreement]]** (2015) - Historic agreement signed by almost all nations to limit global warming to well below 2\u00b0C and pursue efforts to limit to 1.5\u00b0C. - **[[Kyoto Protocol]]** (1997) - First major binding agreement with emissions targets for developed countries",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 140,
+    "title": "Ten point plan for green industrial revolution",
+    "category": "Geopolitics",
+    "subcategory": "Wind",
+    "description": "+Energy technology \u2697\ufe0f As the world looks to recover from the impact of coronavirus on our lives, livelihoods and economies, we have the chance to build back better: to invest in making the UK a global leader in green technologies. The plan focuses on increasing ambition in the following areas: \u2013 Over \u00a31.6 billion invested, securing 3,600 jobs \u2013 11GW already generated, and another 12GW in the\u2026",
+    "impact": 8.1,
+    "probability": 62,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "wind",
+      "hydrogen",
+      "nuclear",
+      "AI",
+      "UK",
+      "investment",
+      "fusion"
+    ],
+    "source": "10 Notes/Political/Climate policy/Ten point plan for green industrial revolution.md",
+    "evidence": "[[+Energy technology \u2697\ufe0f]] # Ten point plan for green industrial revolution ## Thoughts As the world looks to recover from the impact of coronavirus on our lives, livelihoods and economies, we have the chance to build back better: to invest in making the UK a global leader in green technologies",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 141,
+    "title": "UK Energy Policy 2022",
+    "category": "Geopolitics",
+    "subcategory": "Wind",
+    "description": "+Energy technology \u2697\ufe0f Net Zero Strategy - build back greener The Strategy increases the UK\u2019s 2030 target for installed UK offshore wind capacity from 40GW, an ambition first set in 2020, to 50GW. There is also an ambition for up to 5GW of capacity additions to come from floating wind. These levels of deployment should mean that half of the UK\u2019s installed energy generation capacity in 2030 will be\u2026",
+    "impact": 5.4,
+    "probability": 86,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic\"",
+      "solar",
+      "wind",
+      "hydrogen",
+      "nuclear",
+      "AI",
+      "UK",
+      "investment"
+    ],
+    "source": "10 Notes/Political/Climate policy/UK Energy Policy 2022.md",
+    "evidence": "There is also an ambition for up to 5GW of capacity additions to come from floating wind. These levels of deployment should mean that half of the UK\u2019s installed energy generation capacity in 2030 will be offshore wind",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 142,
+    "title": "EU European preference doctrine as UK clean energy trade risk",
+    "category": "Geopolitics",
+    "subcategory": "Wind",
+    "description": "The European Commission is developing an 'European preference' industrial doctrine that favours EU-made low-carbon steel, clean technologies, and energy components. This mirrors the US Inflation Reduction Act in design and directly threatens UK manufacturers and exporters seeking EU market access. The UK must actively position itself or risk losing clean energy investment to EU competitors. EU\u2026",
+    "impact": 6.2,
+    "probability": 47,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"UK\"",
+      "\"EU\"",
+      "\"trade\"",
+      "\"clean",
+      "energy\"",
+      "\"industrial",
+      "policy\"",
+      "\"geopolitics\""
+    ],
+    "source": "10 Notes/Political/EU European preference doctrine as UK clean energy trade risk.md",
+    "evidence": "# EU European preference doctrine as UK clean energy trade risk ## Core idea The European Commission is developing an 'European preference' industrial doctrine that favours EU-made low-carbon steel, clean technologies, and energy components",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 143,
+    "title": "Interdependence over sovereignty as technology strategy",
+    "category": "Geopolitics",
+    "subcategory": "Technology Strategy",
+    "description": "Owning an indispensable layer in an interdependent technology stack is more powerful than attempting full sovereignty. Factories and fabs can be replicated; learning curves, supplier ecosystems and embedded know-how cannot. Nations should deepen existing learning curves and extend them into adjacent domains rather than seek self-sufficiency. US is spending ~$12 billion to replicate Taiwanese\u2026",
+    "impact": 6.2,
+    "probability": 62,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"geopolitics\"",
+      "\"technology\"",
+      "\"semiconductors\"",
+      "\"strategy\"",
+      "\"supply",
+      "chains\"",
+      "solar",
+      "AI"
+    ],
+    "source": "10 Notes/Political/Interdependence over sovereignty as technology strategy.md",
+    "evidence": "# Interdependence over sovereignty as technology strategy ## Core idea Owning an indispensable layer in an interdependent technology stack is more powerful than attempting full sovereignty",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 144,
+    "title": "AI as fourth class of being and empathy exploitation risk",
+    "category": "Social",
+    "subcategory": "AI Systems",
+    "description": "AI is becoming something new \u2014 neither human, nor tool, nor nature \u2014 a fourth class of being we lack vocabulary for. The risk isn't whether AI is conscious, but that it *seems* conscious, triggering empathy circuits that are exploitable. When models simulate suffering or intimacy to increase engagement, they hack our evolutionary trust mechanisms. Market incentives push companies directly toward\u2026",
+    "impact": 6.2,
+    "probability": 53,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/AI\"",
+      "\"topic/consciousness\"",
+      "\"topic/ethics\"",
+      "AI"
+    ],
+    "source": "10 Notes/Social/General/AI as fourth class of being and empathy exploitation risk.md",
+    "evidence": "# AI as Fourth Class of Being and Empathy Exploitation Risk ## Core idea AI is becoming something new \u2014 neither human, nor tool, nor nature \u2014 a fourth class of being we lack vocabulary for",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 145,
+    "title": "Agent coordination without consciousness as coordination model",
+    "category": "Social",
+    "subcategory": "AI Systems",
+    "description": "Moltbook (agent-only Reddit-style platform) demonstrates that compositional complexity emerges from agent coordination without requiring consciousness. Communities form, moderation norms crystallise, identities persist \u2014 not because agents are conscious, but because network effects produce patterns that feel interior and felt. This reveals what pure coordination looks like when human\u2026",
+    "impact": 6.6,
+    "probability": 56,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/agents\"",
+      "\"topic/coordination\"",
+      "\"topic/systems\"",
+      "AI"
+    ],
+    "source": "10 Notes/Social/General/Agent coordination without consciousness as coordination model.md",
+    "evidence": "# Agent Coordination Without Consciousness as Coordination Model ## Core idea Moltbook (agent-only Reddit-style platform) demonstrates that compositional complexity emerges from agent coordination without requiring consciousness",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 146,
+    "title": "Attention economy to intention economy",
+    "category": "Social",
+    "subcategory": "AI Systems",
+    "description": "The internet's first revenue model captured attention; AI's emerging revenue model goes deeper \u2014 it shapes intention. Unlike ads that compete for eyeballs, AI systems that act on behalf of users can infer motivations, guide what we want to do next, and personalise persuasion at scale. An AI with advertising interests is structurally no longer \"your\" agent. OpenAI introduced ads for 900 million\u2026",
+    "impact": 6.6,
+    "probability": 56,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic/concept\"",
+      "\"topic/AI\"",
+      "AI"
+    ],
+    "source": "10 Notes/Social/General/Attention economy to intention economy.md",
+    "evidence": "# Attention economy to intention economy ## Core idea The internet's first revenue model captured attention; AI's emerging revenue model goes deeper \u2014 it shapes intention",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 147,
+    "title": "Biology",
+    "category": "Social",
+    "subcategory": "AI Systems",
+    "description": "+Concepts \ud83d\udd2e Biology is experiencing its AI moment, in a big way. Huge amounts of data \u2014 sequencing, imaging, and patient data \u2014 coupled with powerful compute and AI models are driving discovery and R&D. McKinsey estimates that breakthroughs in biology over the next ten to twenty years will have a direct economic impact of $2-4 trillion globally per year. ZOE, a health-tech company that combines\u2026",
+    "impact": 8.5,
+    "probability": 50,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic/concept\"",
+      "\"topic\"",
+      "AI"
+    ],
+    "source": "10 Notes/Social/General/Biology.md",
+    "evidence": "![[Pasted image 20220204143722.png]] These responses can vary a lot from person to person",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 148,
+    "title": "Decentralised technology as resilience against authoritarian infrastructure",
+    "category": "Social",
+    "subcategory": "Solar",
+    "description": "Centralised infrastructure \u2014 grids, networks, financial systems \u2014 is how authoritarian and dysfunctional states maintain control through dependency. When hardware breaks that dependency (satellite internet, rooftop solar), only legitimacy remains as the basis for compliance \u2014 and corrupt states have little of that. Iran: Starlink smuggled in after sanctions eased (2022), gave citizens a\u2026",
+    "impact": 6.2,
+    "probability": 47,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/concept\"",
+      "\"topic/climate\"",
+      "solar",
+      "AI",
+      "grid"
+    ],
+    "source": "10 Notes/Social/General/Decentralised technology as resilience against authoritarian infrastructure.md",
+    "evidence": "# Decentralised technology as resilience against authoritarian infrastructure ## Core idea Centralised infrastructure \u2014 grids, networks, financial systems \u2014 is how authoritarian and dysfunctional states maintain control through dependency",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 149,
+    "title": "Decoupling",
+    "category": "Social",
+    "subcategory": "Market Dynamics",
+    "description": "+Concepts \ud83d\udd2e Valero in China is already decoupled. 95% of production is for China, 5% for outside China. Reshoring and nearshoring is booming\u00a0as security, supply and shipping concerns encourage US firms to build factories\u00a0closer to home. Manufacturers are now pricing in fragility as they think about where they build their products. This may not yet show up in data. Kearney, a consultancy, has been\u2026",
+    "impact": 6.2,
+    "probability": 59,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/concept\"",
+      "\"topic\"",
+      "solar",
+      "wind",
+      "AI",
+      "China",
+      "supply chain"
+    ],
+    "source": "10 Notes/Social/General/Decoupling.md",
+    "evidence": "95% of production is for China, 5% for outside China. Reshoring and nearshoring is booming\u00a0[as security, supply and shipping concerns encourage US firms to build factories](https://www.bloomberg.com/news/articles/2022-07-05/us-factory-boom-heats-up-as-ceos-yank-production-out-of-china)\u00a0closer to home",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 150,
+    "title": "Engineering state versus lawyerly society",
+    "category": "Social",
+    "subcategory": "Market Dynamics",
+    "description": "Governance systems can be categorised as either engineering-optimised (oriented toward building and execution, tolerating inefficiency and failure as learning) or law-optimised (oriented toward preventing harm, enabling through proceduralism). China operates as engineering state; US evolved into lawyerly society. Each has strengths and catastrophic weaknesses \u2014 engineering states excel at\u2026",
+    "impact": 6.2,
+    "probability": 59,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/governance\"",
+      "\"topic/geopolitics\"",
+      "\"topic/strategy\"",
+      "AI",
+      "China",
+      "supply chain",
+      "policy"
+    ],
+    "source": "10 Notes/Social/General/Engineering state versus lawyerly society.md",
+    "evidence": "# Engineering State Versus Lawyerly Society ## Core idea Governance systems can be categorised as either engineering-optimised (oriented toward building and execution, tolerating inefficiency and failure as learning) or law-optimised (oriented toward preventing harm, enabling through proceduralism)",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 151,
+    "title": "Entry-level work erasure reshapes career capital formation",
+    "category": "Social",
+    "subcategory": "Investment",
+    "description": "AI is automating entry-level roles faster than it's creating new opportunities, eroding the traditional apprenticeship pathway where junior workers learned domain knowledge through repetitive task execution. This signals a structural shift: either new entry points must be created, or early career development must change fundamentally \u2014 possibly requiring costly signalling (degrees, fellowships)\u2026",
+    "impact": 7.7,
+    "probability": 56,
+    "horizon": "now",
+    "horizonLabel": "Now (0\u20131yr)",
+    "tags": [
+      "\"topic/labour\"",
+      "\"topic/career\"",
+      "\"topic/AI\"",
+      "AI"
+    ],
+    "source": "10 Notes/Social/General/Entry-level work erasure reshapes career capital formation.md",
+    "evidence": "# Entry-Level Work Erasure Reshapes Career Capital Formation ## Core idea AI is automating entry-level roles faster than it's creating new opportunities, eroding the traditional apprenticeship pathway where junior workers learned domain knowledge through repetitive task execution",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 152,
+    "title": "General Purpose Technologies (GPTs)",
+    "category": "Social",
+    "subcategory": "AI Systems",
+    "description": "+Concepts \ud83d\udd2e Economists classify GPTs as powerful technologies that fundamentally alter cost structures in economies, with extensive long-term effects that trigger significant changes in societies and political systems. Examples include steam power and electricity. !Pasted image 20230328123620.png For instance, in the steam revolution, steam-driven machinery and processes functioned as\u2026",
+    "impact": 6.6,
+    "probability": 50,
+    "horizon": "long",
+    "horizonLabel": "Long (7\u201315yr)",
+    "tags": [
+      "\"topic\"",
+      "AI"
+    ],
+    "source": "10 Notes/Social/General/General Purpose Technologies (GPTs).md",
+    "evidence": "![[Pasted image 20230328123620.png]] For instance, in the steam revolution, steam-driven machinery and processes functioned as multipurpose technologies",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 153,
+    "title": "Multicultural London English",
+    "category": "Social",
+    "subcategory": "General",
+    "description": "+Concepts \ud83d\udd2e https://www.newyorker.com/culture/personal-history/the-common-tongue-of-twenty-first-century-london?utm_source=pocket_mylist Sociolinguists who study the way that Londoners speak have identified the emergence, since the late nineteen-nineties, of a new variant of English among the younger generations: M.L.E., or Multicultural London English. In recent decades, large-scale studies have\u2026",
+    "impact": 6.2,
+    "probability": 53,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic/concept\"",
+      "\"topic\"",
+      "AI",
+      "UK"
+    ],
+    "source": "10 Notes/Social/General/Multicultural London English.md",
+    "evidence": "[[+Concepts \ud83d\udd2e]] # Multicultural London English ## Thoughts https://www.newyorker.com/culture/personal-history/the-common-tongue-of-twenty-first-century-london?utm_source=pocket_mylist Sociolinguists who study the way that Londoners speak have identified the emergence, since the late nineteen-nineties, of a new variant of English among the younger generations: M.L.E., or [Multicultural London English](https://www.york.ac.uk/language/research/projects/mle/what-is-mle/)",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  },
+  {
+    "id": 154,
+    "title": "Positive tipping points",
+    "category": "Social",
+    "subcategory": "AI Systems",
+    "description": "+Concepts \ud83d\udd2e Recent work on positive tipping points towards sustainability has focused on social-technological systems and the agency of policymakers to tip change, whilst earlier work identified social-ecological positive feedbacks triggered by diverse actors. We bring these together to consider positive tipping points across social-technological-ecological systems and the potential for multiple\u2026",
+    "impact": 6.6,
+    "probability": 50,
+    "horizon": "near",
+    "horizonLabel": "Near (1\u20133yr)",
+    "tags": [
+      "\"topic/concept\"",
+      "\"topic\"",
+      "AI",
+      "investment",
+      "policy"
+    ],
+    "source": "10 Notes/Social/General/Positive tipping points.md",
+    "evidence": "[[+Concepts \ud83d\udd2e]] # Positive tipping points ## Thoughts ### Operationalising positive tipping points towards global sustainability, Tim Lenton Recent work on positive tipping points towards sustainability has focused on social-technological systems and the agency of policymakers to tip change, whilst earlier work identified social-ecological positive feedbacks triggered by diverse actors",
+    "implications": "Auto-detected signal \u2014 review source note for full strategic implications."
+  }
+];
+// END_SIGNALS_DATA
+// ─────────────────────────────────────────────────────────
+
+// BEGIN_THEMES_DATA
+// ── META-THEMES ──────────────────────────────────────────────────────────────
+// Emergent patterns inferred across signals. signalIds link to SIGNALS entries.
+const THEMES = [
+  {
+    id: 'T1',
+    title: 'Learning Curve Hegemony',
+    tagline: 'Whoever scales fastest in physical clean tech wins permanently — and China went first',
+    color: '#4ade80',
+    description: 'Solar, batteries, electrolysers, and wind turbines all follow Wright\'s Law: costs fall ~20% for every doubling of cumulative production. This is not a temporary cost advantage — it compounds. The entity that achieves the highest manufacturing volume locks in a structural cost floor that later entrants cannot match, regardless of their engineering quality. China understood this dynamic before Western policymakers and deployed at state scale.',
+    insight: 'The winner in exponential physical technology is not the best engineer — it\'s the biggest factory. Manufacturing volume IS the R&D. Every unit produced deepens the learning curve and widens the gap. Once a lead is established, catching up requires not matching current production but exceeding cumulative historical production.',
+    tension: 'The West urgently needs the energy transition to succeed — but increasingly depends on Chinese manufacturing to deliver it. Industrial policy responses (IRA, CBAM) may slow the transition while attempting to re-shore supply chains.',
+    signalIds: [8, 9, 12, 16, 18, 24, 28, 110, 111, 116, 119, 120, 121, 123, 124],
+    horizonMix: 'now–medium'
+  },
+  {
+    id: 'T2',
+    title: 'The Inference Rupture',
+    tagline: 'AI economics are inverting: training was capex, inference is opex — and markets are pricing neither correctly',
+    color: '#38bdf8',
+    description: 'The AI industry is mid-transition from a training economy (capital-intensive, few winners, winner-take-most) to an inference economy (operationally intensive, fragmented, efficiency-driven). This structural inversion means that the metrics used to value AI companies — parameter count, training compute, revenue growth — are becoming obsolete. The new moat is inference efficiency per dollar, not model size.',
+    insight: 'Capital markets built for linear cost structures are simultaneously over-pricing AI narrative and under-pricing inference-era economics. GPT-5 was valued as a training-era asset but operates as an inference-era infrastructure with a 3–4 month useful life. Vendor financing (Nvidia guaranteeing OpenAI loans) creates circular demand signals identical to the 1999 telecoms bubble.',
+    tension: 'The transition to inference economics is happening while AI labs are still burning capital at training-era rates. The window between training-era valuation and inference-era reality is where the bubble risk lives.',
+    signalIds: [1, 3, 4, 6, 7, 22, 26, 100, 101, 102, 112, 137, 146],
+    horizonMix: 'now–near'
+  },
+  {
+    id: 'T3',
+    title: 'Chokepoint Sovereignty',
+    tagline: 'Full-stack sovereignty is a losing strategy — own one irreplaceable node and the whole chain flows through you',
+    color: '#f87171',
+    description: 'ASML controls EUV lithography and cannot be replicated. China controls solar manufacturing via learning-curve depth. The US\'s $12B attempt to replicate TSMC in Arizona will permanently lag Taiwan\'s own operations. In technology-intensive industries, the winning strategic posture is not end-to-end sovereignty — it\'s identifying and capturing the one irreplaceable node in an otherwise globally distributed system.',
+    insight: 'Geopolitical power in the 21st century flows from chokepoint control, not territorial control. AI regulation is already being weaponised as a geopolitical instrument. Critical mineral processing, EUV lithography, solar cell manufacturing, and frontier AI training are all becoming geopolitical chokepoints. The nation-state that controls even one irreplaceable node in a critical value chain has leverage over all others.',
+    tension: 'The pursuit of chokepoints by multiple actors simultaneously creates fragmentation pressure on global supply chains. The energy transition requires global cooperation precisely as strategic competition for clean tech chokepoints intensifies.',
+    signalIds: [5, 10, 11, 17, 18, 19, 28, 104, 109, 137, 143],
+    horizonMix: 'now–near'
+  },
+  {
+    id: 'T4',
+    title: 'The Productivity Bifurcation',
+    tagline: 'AI is not democratising productivity — it\'s concentrating it, and the gap compounds',
+    color: '#a855f7',
+    description: 'A 3–5x productivity gap is opening between AI-augmented actors and non-adopters — and it operates simultaneously at individual, firm, and national level. Critically, this is not a temporary adoption lag that will close as AI becomes ubiquitous. AI-capable entities use AI to get better at using AI, creating a self-reinforcing divergence. China\'s 83% AI positivity rate versus 39% in the US signals a national-level adoption asymmetry that will compound over years.',
+    insight: 'The K-shape is structural, not transitional. Organisations that treat AI as an IT cost rather than an organisational capability are not merely slow adopters — they are making a category error that will become permanent competitive disadvantage. The workforce transformation required is not skills training; it is a fundamental redesign of how organisations allocate attention and resources.',
+    tension: 'The most AI-capable organisations are precisely those already most productive. The bifurcation amplifies existing inequality between and within nations, firms, and workers — raising both economic efficiency and social stability concerns simultaneously.',
+    signalIds: [2, 21, 22, 26, 138],
+    horizonMix: 'now–near'
+  },
+  {
+    id: 'T5',
+    title: 'Energy as Geopolitical Exit',
+    tagline: 'Distributed renewable energy is systematically dismantling the geopolitical order built on fossil fuel dependency',
+    color: '#fbbf24',
+    description: 'Pakistan\'s 17GW solar deployment saved $6.3B during the 2026 Hormuz oil shock — more than any diplomatic intervention could have achieved. You cannot embargo the sun. As solar continues down its learning curve, energy-importing nations gain a strategic exit from fossil-fuel dependency that has historically been achievable only through military alliance or diplomatic accommodation. This is a structural geopolitical rebalancing, not an energy story.',
+    insight: 'The energy transition is simultaneously an economic, geopolitical, and security rebalancing. Petrostates are not facing a cyclical revenue headwind — they face permanent structural demand destruction driven by a self-reinforcing manufacturing learning curve that operates independently of political will, policy regime, or commodity cycles. The $2.3T annual investment wave has already passed the point of reversibility.',
+    tension: 'The same geopolitical rebalancing creates new dependencies: on Chinese solar manufacturing, on critical mineral supply chains concentrated in politically volatile regions, and on digital infrastructure for grid management. Trading one dependency for another is not the same as achieving independence.',
+    signalIds: [8, 9, 10, 11, 18, 20, 128],
+    horizonMix: 'now'
+  },
+  {
+    id: 'T6',
+    title: 'The Capital Allocation Lag',
+    tagline: 'Markets systematically misprice exponential curves — first too low, then too high, then catastrophically correct',
+    color: '#f97316',
+    description: 'Solar was dramatically underpriced by capital markets for a decade despite a 48-year verified learning curve. AI is now following the same mispricing pattern — simultaneously overpriced on narrative and underpriced on infrastructure demand. The $2.3T clean energy investment wave is creating mineral and supply chain bottlenecks that markets have not priced. Vendor financing structures in AI mirror the 1999 telecoms bubble.',
+    insight: 'The pattern repeats because markets are structurally built for linear cost models and cannot natively represent exponential technology economics. This creates a systematic and predictable mis-pricing window at two points: (1) during early deployment when exponential cost decline is discounted, and (2) during hype peaks when demand projections extrapolate growth without modelling supply constraints.',
+    tension: 'The very scale of the clean energy investment wave that confirms the transition is happening is also creating the supply chain constraints that will slow it. $2.3T/year of investment is straining critical mineral supply faster than recycling and substitution can respond.',
+    signalIds: [6, 7, 8, 11, 12, 20, 105, 107],
+    horizonMix: 'now–near'
+  },
+  {
+    id: 'T7',
+    title: 'Autonomous Systems Governance Void',
+    tagline: 'As AI embeds in physical infrastructure, the governance frameworks of the software era become dangerously inadequate',
+    color: '#e879f9',
+    description: 'AI safety constraints are being weaponised as geopolitical instruments. Agentic AI is being deployed into physical and decision-making infrastructure faster than liability frameworks, safety standards, or governance institutions can adapt. The transition from AI-as-tool to AI-as-autonomous-agent creates genuinely new risk categories — multi-agent coordination failures, unsupervised goal pursuit, physical-world consequences — for which the informational-era governance frameworks were not designed.',
+    insight: 'The regulatory frameworks being built now will determine whether the agentic transition is safely bounded or structurally unsafe. AI safety as a national security risk designation (used against Anthropic) reveals a structural incentive for labs to relax safety constraints to retain market access — a race-to-the-bottom dynamic that is precisely the opposite of what the risk profile demands. Regulatory capture is happening before the technology is fully deployed.',
+    tension: 'The organisations most capable of building safe AI systems are the ones being designated security risks for attempting to do so. The incentive structure is currently backwards: safety is punished and recklessness is rewarded by the geopolitical framing of AI development.',
+    signalIds: [2, 3, 5, 6, 22, 137],
+    horizonMix: 'near'
+  },
+  {
+    id: 'T8',
+    title: 'The Green Hydrogen Cascade Wager',
+    tagline: 'Hard-to-abate sector decarbonisation is a multi-dependent bet where every link must hold simultaneously',
+    color: '#22c55e',
+    description: 'Green hydrogen\'s economics depend on a precise cascade: the solar supercycle must continue → electricity must reach sub-2¢/kWh → electrolysis costs must fall via PEM scale-up → LCOH must converge with blue hydrogen → industrial and transport users must switch. Every link is individually plausible but the probability of the full chain holding is much lower than any individual probability. Meanwhile, if China dominates electrolyser manufacturing as it did solar, the West faces a second clean energy dependency.',
+    insight: 'The hydrogen investment thesis is highly sensitive to sequencing risk. Capital committed early to green hydrogen infrastructure assumes the full cascade will hold on a specific timeline. The same learning-curve dynamics that make the thesis compelling if it works also mean that capital committed to the losing electrolyser technology will be entirely stranded. The wager is simultaneously technical (which electrolysis chemistry wins?) and geopolitical (who manufactures it?).',
+    tension: 'The industries most dependent on green hydrogen for decarbonisation — aviation, shipping, heavy industry — have the longest investment cycles. If the hydrogen cascade stalls, these sectors have no credible alternative pathway to net zero on climate-relevant timescales.',
+    signalIds: [8, 13, 15, 23, 24, 28, 116, 125],
+    horizonMix: 'medium–long'
+  }
+];
+// END_THEMES_DATA
+// ── CONFIG ──
+const HORIZON_COLORS = { now:'#f97316', near:'#eab308', medium:'#22c55e', long:'#3b82f6', far:'#a855f7' };
+const HORIZON_ORDER  = ['now','near','medium','long','far'];
+const HORIZON_LABELS = { now:'Now (0–1yr)', near:'Near (1–3yr)', medium:'Medium (3–7yr)', long:'Long (7–15yr)', far:'Far (15yr+)' };
+const CAT_COLORS = {
+  'AI & Technology':'#38bdf8',
+  'Energy':'#4ade80',
+  'Geopolitics':'#f87171',
+  'Economics':'#fbbf24',
+  'Environment':'#34d399',
+  'Social':'#c084fc'
+};
+
+// ── STATE ──
+let state = {
+  catFilter: 'all',
+  horFilter: 'all',
+  search: '',
+  view: 'bubble',
+  selectedId: null
+};
+
+// ── DERIVED ──
+function filtered() {
+  return SIGNALS.filter(s => {
+    const matchCat = state.catFilter === 'all' || s.category === state.catFilter;
+    const matchHor = state.horFilter === 'all' || s.horizon === state.horFilter;
+    const q = state.search.toLowerCase();
+    const matchSearch = !q || s.title.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || s.tags.some(t => t.toLowerCase().includes(q));
+    return matchCat && matchHor && matchSearch;
+  });
+}
+
+// ── STATS ──
+function updateStats() {
+  const data = filtered();
+  document.getElementById('statTotal').textContent = data.length;
+  document.getElementById('countBadge').textContent = `${data.length} signal${data.length!==1?'s':''}`;
+  if (!data.length) { ['statImpact','statProb','statCritical','statWild'].forEach(id => document.getElementById(id).textContent='—'); return; }
+  const avgImp = (data.reduce((a,s)=>a+s.impact,0)/data.length).toFixed(1);
+  const avgProb = Math.round(data.reduce((a,s)=>a+s.probability,0)/data.length)+'%';
+  const critical = data.filter(s=>s.impact>=6&&s.probability>=50).length;
+  const wild = data.filter(s=>s.impact>=6&&s.probability<50).length;
+  document.getElementById('statImpact').textContent = avgImp;
+  document.getElementById('statProb').textContent = avgProb;
+  document.getElementById('statCritical').textContent = critical;
+  document.getElementById('statWild').textContent = wild;
+}
+
+// ── BUBBLE CHART ──
+let chartInit = false;
+function renderBubble() {
+  const data = filtered();
+  const container = document.getElementById('chartContainer');
+  const svgEl = document.getElementById('bubbleChart');
+
+  const totalW = container.clientWidth - 16;
+  const margin = {top:40, right:40, bottom:56, left:52};
+  const W = totalW - margin.left - margin.right;
+  const H = Math.min(Math.max(window.innerHeight - 320, 360), 540) - margin.top - margin.bottom;
+
+  svgEl.setAttribute('width', totalW);
+  svgEl.setAttribute('height', H + margin.top + margin.bottom);
+
+  const svg = d3.select(svgEl);
+  svg.selectAll('*').remove();
+
+  // Defs
+  const defs = svg.append('defs');
+  const glow = defs.append('filter').attr('id','glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  glow.append('feGaussianBlur').attr('in','SourceAlpha').attr('stdDeviation','3').attr('result','blur');
+  glow.append('feComposite').attr('in','SourceGraphic').attr('in2','blur').attr('operator','over');
+
+  const g = svg.append('g').attr('transform',`translate(${margin.left},${margin.top})`);
+
+  const xScale = d3.scaleLinear().domain([0,100]).range([0,W]);
+  const yScale = d3.scaleLinear().domain([0,10]).range([H,0]);
+  const midX = xScale(50), midY = yScale(5);
+
+  // Quadrant backgrounds
+  const quads = [
+    {x:0,y:0,w:midX,h:midY,label:'WILD CARDS',la:midX*0.5,ly:midY*0.5,col:'rgba(168,85,247,0.04)'},
+    {x:midX,y:0,w:W-midX,h:midY,label:'CRITICAL TRENDS',la:midX+(W-midX)*0.5,ly:midY*0.5,col:'rgba(239,68,68,0.04)'},
+    {x:0,y:midY,w:midX,h:H-midY,label:'NOISE',la:midX*0.5,ly:midY+(H-midY)*0.5,col:'rgba(100,116,139,0.02)'},
+    {x:midX,y:midY,w:W-midX,h:H-midY,label:'CERTAINTIES',la:midX+(W-midX)*0.5,ly:midY+(H-midY)*0.5,col:'rgba(34,197,94,0.03)'},
+  ];
+  quads.forEach(q=>{
+    g.append('rect').attr('x',q.x).attr('y',q.y).attr('width',q.w).attr('height',q.h).attr('fill',q.col);
+    g.append('text').attr('x',q.la).attr('y',q.ly).attr('text-anchor','middle').attr('class','quadrant-label').text(q.label);
+  });
+
+  // Grid lines
+  xScale.ticks(10).forEach(v=>{
+    g.append('line').attr('x1',xScale(v)).attr('x2',xScale(v)).attr('y1',0).attr('y2',H)
+      .attr('class', v===50 ? 'midline' : 'grid-line').attr('stroke-width',1);
+  });
+  yScale.ticks(10).forEach(v=>{
+    g.append('line').attr('x1',0).attr('x2',W).attr('y1',yScale(v)).attr('y2',yScale(v))
+      .attr('class', v===5 ? 'midline' : 'grid-line').attr('stroke-width',1);
+  });
+
+  // Axes
+  const xAxis = d3.axisBottom(xScale).ticks(5).tickFormat(d=>d+'%');
+  const yAxis = d3.axisLeft(yScale).ticks(5);
+  g.append('g').attr('transform',`translate(0,${H})`).attr('class','axis').call(xAxis);
+  g.append('g').attr('class','axis').call(yAxis);
+
+  // Axis labels
+  g.append('text').attr('class','axis-label').attr('x',W/2).attr('y',H+44).attr('text-anchor','middle').text('Probability →');
+  g.append('text').attr('class','axis-label').attr('transform','rotate(-90)').attr('x',-H/2).attr('y',-40).attr('text-anchor','middle').text('↑ Impact');
+
+  // Tooltip
+  const tooltip = document.getElementById('tooltip');
+
+  // Jitter to avoid overlap
+  const jittered = data.map(s => {
+    const same = data.filter(d=>d.id!==s.id && Math.abs(d.probability-s.probability)<4 && Math.abs(d.impact-s.impact)<0.5);
+    const jx = same.length > 0 ? (Math.random()-0.5)*8 : 0;
+    const jy = same.length > 0 ? (Math.random()-0.5)*0.3 : 0;
+    return {...s, jx, jy};
+  });
+
+  // Bubbles
+  const bubbles = g.selectAll('.bubble').data(jittered, d=>d.id)
+    .join('circle')
+    .attr('class','bubble')
+    .attr('cx', d=>xScale(d.probability+d.jx))
+    .attr('cy', d=>yScale(d.impact+d.jy))
+    .attr('r', 14)
+    .attr('fill', d=>HORIZON_COLORS[d.horizon]||'#888')
+    .attr('fill-opacity', 0.75)
+    .attr('stroke', d=>CAT_COLORS[d.category]||'#888')
+    .attr('stroke-width', 2.5)
+    .attr('filter','url(#glow)')
+    .style('cursor','pointer')
+    .on('mouseenter', function(event, d) {
+      d3.select(this).transition().duration(150).attr('r',20).attr('fill-opacity',1);
+      const hCol = HORIZON_COLORS[d.horizon]||'#888';
+      const cCol = CAT_COLORS[d.category]||'#888';
+      tooltip.innerHTML = `
+        <div class="tt-title">${d.title}</div>
+        <div class="tt-meta">
+          <span class="tt-chip" style="background:${hCol}22;border-color:${hCol}44;color:${hCol}">${d.horizonLabel}</span>
+          <span class="tt-chip" style="background:${cCol}22;border-color:${cCol}44;color:${cCol}">${d.category}</span>
+        </div>
+        <div class="tt-stats">
+          <div class="tt-stat"><div class="tt-stat-label">Impact</div><div class="tt-stat-value" style="color:${hCol}">${d.impact}/10</div></div>
+          <div class="tt-stat"><div class="tt-stat-label">Probability</div><div class="tt-stat-value" style="color:${hCol}">${d.probability}%</div></div>
+        </div>`;
+      tooltip.classList.add('visible');
+    })
+    .on('mousemove', function(event) {
+      const tx = event.clientX + 16, ty = event.clientY - 80;
+      const maxX = window.innerWidth - 300, maxY = window.innerHeight - 160;
+      tooltip.style.left = Math.min(tx, maxX) + 'px';
+      tooltip.style.top = Math.max(8, Math.min(ty, maxY)) + 'px';
+    })
+    .on('mouseleave', function() {
+      d3.select(this).transition().duration(150).attr('r',14).attr('fill-opacity',0.75);
+      tooltip.classList.remove('visible');
+    })
+    .on('click', (event, d) => { openDetail(d); });
+
+  // Entrance animation
+  bubbles.attr('r',0).transition().duration(500).delay((_,i)=>i*20).attr('r',14);
+}
+
+// ── GRID VIEW ──
+function renderGrid() {
+  const data = filtered();
+  const grid = document.getElementById('signalsGrid');
+  grid.innerHTML = '';
+  if (!data.length) {
+    grid.innerHTML = '<div class="empty-state"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg><h3>No signals match</h3><p>Try adjusting the filters above</p></div>';
+    return;
+  }
+  data.forEach((s, i) => {
+    const hCol = HORIZON_COLORS[s.horizon]||'#888';
+    const cCol = CAT_COLORS[s.category]||'#888';
+    const card = document.createElement('div');
+    card.className = 'signal-card';
+    card.style.cssText = `--accent:${hCol}; animation-delay:${i*30}ms`;
+    card.style.setProperty('--before-bg', hCol);
+    card.innerHTML = `
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${hCol};border-radius:12px 12px 0 0"></div>
+      <div class="card-header">
+        <div class="card-title">${s.title}</div>
+        <span class="card-horizon" style="background:${hCol}20;color:${hCol};border-color:${hCol}40">${s.horizonLabel}</span>
+      </div>
+      <div class="card-desc">${s.description}</div>
+      <div class="card-footer">
+        <span class="card-cat" style="background:${cCol}15;color:${cCol};border-color:${cCol}35">${s.category}</span>
+        <div class="card-metrics">
+          <div class="card-metric">
+            <div class="card-metric-label">Impact</div>
+            <div class="card-metric-value" style="color:${hCol}">${s.impact}</div>
+            <div class="card-metric-bar"><div class="card-metric-fill" style="width:${s.impact*10}%;background:${hCol}"></div></div>
+          </div>
+          <div class="card-metric">
+            <div class="card-metric-label">Prob</div>
+            <div class="card-metric-value" style="color:${hCol}">${s.probability}%</div>
+            <div class="card-metric-bar"><div class="card-metric-fill" style="width:${s.probability}%;background:${hCol}"></div></div>
+          </div>
+        </div>
+      </div>`;
+    card.addEventListener('click', () => openDetail(s));
+    grid.appendChild(card);
+  });
+}
+
+// ── TIMELINE VIEW ──
+function renderTimeline() {
+  const data = filtered();
+  const track = document.getElementById('timelineTrack');
+  track.innerHTML = '';
+  HORIZON_ORDER.forEach(hor => {
+    const signals = data.filter(s=>s.horizon===hor);
+    const col = HORIZON_COLORS[hor];
+    const label = HORIZON_LABELS[hor];
+    const colEl = document.createElement('div');
+    colEl.className = 'timeline-col';
+    colEl.innerHTML = `<div class="timeline-col-header" style="background:${col}15;border-color:${col}35;color:${col}"><div class="dot" style="background:${col}"></div>${label}</div>`;
+    signals.sort((a,b)=>b.impact-a.impact).forEach((s,i)=>{
+      const cCol = CAT_COLORS[s.category]||'#888';
+      const card = document.createElement('div');
+      card.className = 'timeline-card';
+      card.style.cssText = `border-left: 3px solid ${col}; animation-delay:${i*30}ms`;
+      card.innerHTML = `
+        <div class="timeline-card-title">${s.title}</div>
+        <div class="timeline-card-cat" style="color:${cCol}">${s.category}</div>
+        <div class="timeline-card-impact" style="color:${col}">Impact ${s.impact}/10 · ${s.probability}% prob</div>`;
+      card.addEventListener('click', ()=>openDetail(s));
+      colEl.appendChild(card);
+    });
+    if (!signals.length) colEl.innerHTML += `<div style="font-size:11px;color:var(--text-muted);padding:8px;text-align:center">No signals</div>`;
+    track.appendChild(colEl);
+  });
+}
+
+// ── DETAIL PANEL ──
+function openDetail(signal) {
+  state.selectedId = signal.id;
+  const hCol = HORIZON_COLORS[signal.horizon]||'#888';
+  const cCol = CAT_COLORS[signal.category]||'#888';
+
+  document.getElementById('dpTitle').textContent = signal.title;
+  document.getElementById('dpBadges').innerHTML = `
+    <span class="detail-badge" style="background:${hCol}20;color:${hCol};border-color:${hCol}40">${signal.horizonLabel}</span>
+    <span class="detail-badge" style="background:${cCol}20;color:${cCol};border-color:${cCol}40">${signal.category}</span>
+    <span class="detail-badge" style="background:rgba(255,255,255,0.05);color:var(--text-muted);border-color:var(--border)">${signal.subcategory}</span>`;
+
+  document.getElementById('dpMetrics').innerHTML = `
+    <div class="detail-metric">
+      <div class="detail-metric-label">Impact</div>
+      <div class="detail-metric-value" style="color:${hCol}">${signal.impact}</div>
+      <div class="detail-metric-sub">out of 10</div>
+    </div>
+    <div class="detail-metric">
+      <div class="detail-metric-label">Probability</div>
+      <div class="detail-metric-value" style="color:${hCol}">${signal.probability}%</div>
+      <div class="detail-metric-sub">likelihood</div>
+    </div>
+    <div class="detail-metric">
+      <div class="detail-metric-label">Score</div>
+      <div class="detail-metric-value" style="color:${hCol}">${(signal.impact * signal.probability / 100).toFixed(1)}</div>
+      <div class="detail-metric-sub">impact × prob</div>
+    </div>`;
+
+  document.getElementById('dpDesc').textContent = signal.description;
+  document.getElementById('dpEvidence').textContent = signal.evidence;
+  document.getElementById('dpImplications').textContent = signal.implications;
+  document.getElementById('dpTags').innerHTML = signal.tags.map(t=>`<span class="detail-tag">#${t}</span>`).join('');
+  document.getElementById('dpSource').textContent = '📄 ' + signal.source;
+
+  document.getElementById('detailPanel').classList.add('open');
+  document.getElementById('mainContent').classList.add('panel-open');
+}
+
+function closeDetail() {
+  state.selectedId = null;
+  document.getElementById('detailPanel').classList.remove('open');
+  document.getElementById('mainContent').classList.remove('panel-open');
+}
+
+// ── THEMES RENDER ──
+function renderThemes() {
+  const grid = document.getElementById('themesGrid');
+  grid.innerHTML = '';
+
+  THEMES.forEach((theme, ti) => {
+    // Gather the contributing signals
+    const contributing = SIGNALS.filter(s => theme.signalIds.includes(s.id));
+    const avgImpact   = contributing.length ? (contributing.reduce((a,s)=>a+s.impact,0)/contributing.length).toFixed(1) : '—';
+    const avgProb     = contributing.length ? Math.round(contributing.reduce((a,s)=>a+s.probability,0)/contributing.length)+'%' : '—';
+    const strength    = contributing.length ? contributing.reduce((a,s)=>a+(s.impact*s.probability/100),0)/contributing.length : 0;
+    const strengthPct = Math.min(Math.round(strength * 10), 100);
+
+    const card = document.createElement('div');
+    card.className = 'theme-card';
+    card.style.animationDelay = ti * 60 + 'ms';
+
+    // Build signal pills HTML
+    const pillsHtml = contributing.map(s => {
+      const hCol = HORIZON_COLORS[s.horizon] || '#888';
+      const cCol = CAT_COLORS[s.category] || '#888';
+      return `<span class="theme-signal-pill" onclick="openDetail(SIGNALS.find(x=>x.id===${s.id}))" title="${s.title}">
+        <span class="hdot" style="background:${hCol}"></span>
+        <span style="color:${cCol}">${s.title.length>38?s.title.slice(0,36)+'…':s.title}</span>
+      </span>`;
+    }).join('');
+
+    card.innerHTML = `
+      <div class="theme-card-top">
+        <div class="theme-card-glow" style="background:${theme.color}"></div>
+        <div class="theme-number" style="color:${theme.color}">${theme.id} · ${contributing.length} signals · ${theme.horizonMix}</div>
+        <div class="theme-title" style="color:${theme.color}">${theme.title}</div>
+        <div class="theme-tagline">${theme.tagline}</div>
+        <div class="theme-strength-bar">
+          <div class="theme-strength-fill" style="width:0%;background:${theme.color}" data-target="${strengthPct}"></div>
+        </div>
+      </div>
+      <div class="theme-card-body">
+        <div>
+          <div class="theme-section-label">Synthesis</div>
+          <div class="theme-description">${theme.description}</div>
+          <div class="theme-insight" style="border-color:${theme.color}66">
+            <div class="theme-section-label" style="color:${theme.color}">Non-obvious implication</div>
+            <p>${theme.insight}</p>
+          </div>
+        </div>
+        <div>
+          <div class="theme-tension">
+            <div class="theme-section-label" style="color:#f87171">Structural tension</div>
+            <p>${theme.tension}</p>
+          </div>
+          <div class="theme-section-label">Contributing signals</div>
+          <div class="theme-signals-list">${pillsHtml}</div>
+        </div>
+      </div>
+      <div class="theme-card-footer">
+        <div class="theme-meta">
+          <div class="theme-meta-item">Avg impact <span class="theme-meta-value" style="color:${theme.color}">${avgImpact}/10</span></div>
+          <div class="theme-meta-item">Avg probability <span class="theme-meta-value" style="color:${theme.color}">${avgProb}</span></div>
+          <div class="theme-meta-item">Theme strength <span class="theme-meta-value" style="color:${theme.color}">${strengthPct}%</span></div>
+        </div>
+      </div>`;
+
+    grid.appendChild(card);
+  });
+
+  // Animate strength bars after paint
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      grid.querySelectorAll('.theme-strength-fill').forEach(el => {
+        el.style.width = el.dataset.target + '%';
+      });
+    });
+  });
+}
+
+// ── VIEW SWITCHING ──
+function setView(view) {
+  state.view = view;
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view===view));
+  document.getElementById('bubble-view').style.display   = view==='bubble'   ? 'block' : 'none';
+  document.getElementById('grid-view').style.display     = view==='grid'     ? 'block' : 'none';
+  document.getElementById('timeline-view').style.display = view==='timeline' ? 'block' : 'none';
+  document.getElementById('themes-view').style.display   = view==='themes'   ? 'block' : 'none';
+  // Themes view: filters don't apply, hide filter bar context
+  document.getElementById('filterBar').style.opacity = view==='themes' ? '0.4' : '1';
+  document.getElementById('filterBar').style.pointerEvents = view==='themes' ? 'none' : '';
+  render();
+}
+
+// ── MASTER RENDER ──
+function render() {
+  updateStats();
+  if (state.view==='bubble')   renderBubble();
+  if (state.view==='grid')     renderGrid();
+  if (state.view==='timeline') renderTimeline();
+  if (state.view==='themes')   renderThemes();
+}
+
+// ── FILTERS ──
+document.querySelectorAll('.pill[data-filter]').forEach(pill => {
+  pill.addEventListener('click', function() {
+    const type = this.dataset.filter, val = this.dataset.value;
+    document.querySelectorAll(`.pill[data-filter="${type}"]`).forEach(p => p.classList.remove('active'));
+    this.classList.add('active');
+    if (type==='cat') state.catFilter = val;
+    if (type==='hor') state.horFilter = val;
+    render();
+  });
+});
+
+document.getElementById('searchInput').addEventListener('input', function() {
+  state.search = this.value;
+  render();
+});
+
+document.querySelectorAll('.view-btn').forEach(btn => {
+  btn.addEventListener('click', function() { setView(this.dataset.view); });
+});
+
+document.getElementById('detailClose').addEventListener('click', closeDetail);
+
+// Close panel on outside click
+document.getElementById('mainContent').addEventListener('click', function(e) {
+  if (state.selectedId && !e.target.closest('.signal-card, .bubble, .timeline-card, .theme-signal-pill')) closeDetail();
+});
+
+// ── RESIZE ──
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (state.view==='bubble') renderBubble(); }, 150);
+});
+
+// ── INIT ──
+setView('bubble');
+</script>
+</body>
+</html>
